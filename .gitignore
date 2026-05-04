@@ -1,3 +1,7 @@
+# zip files
+*.zip
+*.tar.gz
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
