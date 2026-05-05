@@ -1,3 +1,6 @@
+# Large datasets
+librispeech/*
+
 # zip files
 *.zip
 *.tar.gz
