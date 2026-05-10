@@ -1,0 +1,13 @@
+{
+  "features": [
+    "module1_score",
+    "module2_score"
+  ],
+  "n_features": 2,
+  "rf_n_estimators": 200,
+  "rf_max_depth": 8,
+  "rf_accuracy": 0.925,
+  "mlp_accuracy": 0.935,
+  "train_samples": 800,
+  "test_samples": 200
+}
