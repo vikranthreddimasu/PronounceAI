@@ -1,0 +1,46 @@
+# Core API
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.19
+pydantic==2.10.4
+
+# Audio processing
+torchaudio==2.5.1
+torch==2.5.1
+librosa==0.10.2
+soundfile==0.12.1
+numpy==1.26.4
+scipy==1.14.1
+
+# TTS + ASR
+kokoro>=0.9.4
+faster-whisper>=1.0.3
+
+# Phoneme engine
+g2p-en==2.0.0
+transformers==4.47.1
+accelerate==1.2.1
+datasets==3.2.0
+
+# Prosody / formants
+praat-parselmouth==0.4.5
+crepe==0.0.15
+resampy==0.4.3
+
+# VAD
+onnxruntime==1.20.1
+
+# Caching / utilities
+cachetools==5.5.0
+httpx==0.28.1
+python-dotenv==1.0.1
+
+# Fireworks.ai (OpenAI-compatible SDK)
+openai==1.57.4
+
+# HuggingFace Hub (for downloading models + datasets)
+huggingface-hub==0.27.0
+
+# Training (for fine-tuning scripts)
+evaluate==0.4.3
+jiwer==3.0.5

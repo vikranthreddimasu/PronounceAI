@@ -220,3 +220,5 @@ out/
 .DS_Store
 *.tsbuildinfo
 next-env.d.ts
+.gstack/
+.claude/

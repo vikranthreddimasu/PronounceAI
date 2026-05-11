@@ -78,6 +78,20 @@ User Audio (48kHz, stereo)
 
 ---
 
+## Latency Budget
+
+| Stage | Budget | Approach |
+|---|---|---|
+| VAD + resample | < 50ms | Silero ONNX, browser-side |
+| Phoneme alignment (wav2vec2) | < 400ms | GPU batch; stream partial results |
+| Formant + pitch extraction | < 150ms | Parselmouth + CREPE on trimmed audio |
+| Accent embedding (WavLM) | < 300ms | Cached per utterance |
+| LLM feedback (Claude) | < 1500ms | Cache hit: <50ms; miss: first-token streaming |
+| **Total (GPU path)** | **< 2.5s** | P95 target |
+| **On-device (Phase 4)** | **< 200ms** | Quantized wav2vec2-small only |
+
+---
+
 ## Layer-by-Layer Detail
 
 ### Layer 1 — Signal Processing
@@ -105,10 +119,14 @@ This is the piece the current system entirely lacks.
   Higher = more confident the phoneme is correctly articulated.
 - Substitution detection: if the Viterbi path through the CTC outputs yields phoneme X when the reference expected phoneme Y → flag as substitution error (e.g., /θ/ → /d/, /r/ → /l/)
 
+**GOP threshold calibration**: GOP < −2.0 flags a phoneme as incorrect (substitution or severe distortion); −2.0 to −1.0 is marginal (yellow); > −1.0 is correct (green). These thresholds are validated against speechocean762 human ratings and may be adjusted per accent target. The regression head from fine-tuning maps raw GOP to a 0–100 scale.
+
 **Training data for fine-tuning**:
 - speechocean762 (`jbpark0614/speechocean762` on HuggingFace): 5,000 utterances from 250 non-native speakers, human-rated at phoneme/word/utterance level on accuracy, fluency, prosody, and total score. The gold benchmark.
 - L2-ARCTIC (24 non-native speakers, 6 L1 backgrounds, ~7,200 utterances). Phoneme-annotated.
 - VCTK (109 native speakers, UK/US/AU/Scottish/Irish accents) — native side.
+
+**Fine-tuning specifics**: Use `slplab/wav2vec2-large-robust-L2-english-phoneme-recognition` as the frozen CTC backbone — its weights already produce phoneme posteriors calibrated for L2 speech. Fine-tuning means adding a lightweight regression head (2-layer MLP) on top of the per-phoneme GOP vectors, trained to predict the human accuracy ratings from speechocean762 (utterance and phoneme level). This gives calibrated scores that correlate with human judgement rather than raw log-probabilities. The CTC alignment itself uses `torchaudio.functional.forced_align` against the expected phoneme sequence.
 
 **Output per utterance**:
 ```json
@@ -124,6 +142,8 @@ This is the piece the current system entirely lacks.
 
 ### Layer 3 — Prosody Engine
 
+**Input dependencies**: syllable boundary timestamps come from the CTC alignment output (Layer 2); CREPE F0 runs in parallel on the same resampled audio. Both are available before Layer 4 runs.
+
 **Why**: Prosody (stress, rhythm, intonation) is what makes an accent feel native. The current system collapses this into two numbers (pitch mean, pitch std) over the whole utterance.
 
 | Dimension | Method | What it catches |
@@ -137,6 +157,8 @@ This is the piece the current system entirely lacks.
 ### Layer 4 — Accent Distance
 
 **Why**: The user picked a *target* accent. Every score should be relative to that accent, not a generic "good English."
+
+**Speaker normalization**: WavLM-Large produces a 1024-dim utterance embedding. To separate accent from speaker identity, train a PLDA (Probabilistic Linear Discriminant Analysis) backend on VCTK multi-sentence data from the same speaker. Project through PLDA before computing cosine distance to accent centroids. Alternatively, a simpler approach: train a contrastive head (accent pairs from same speaker vs. different speaker) to suppress within-speaker variance.
 
 **Approach**:
 - Encoder: WavLM-Large (SOTA on SUPERB benchmark, handles noise well)
@@ -186,6 +208,8 @@ The weighted overall is shown, but each dimension shown individually with a labe
 
 ## Content & Curriculum System
 
+**Scope constraint (Phase 1–3)**: Input text and reference phrases are English-only. The phoneme engine is trained on English L2 data. Free Recording mode (Phase 3) should validate that input text is ASCII/Latin and warn the user if non-English characters are detected.
+
 ### Content Tiers
 
 1. **Minimal Pairs** — pairs differing by one phoneme: ship/sheep, bed/bad, right/light, three/free, this/dis. Targeted at specific phoneme contrasts the learner's L1 struggles with.
@@ -225,7 +249,7 @@ Per phoneme, per learner: FSRS algorithm (better than SM-2, open-source).
 
 **TTS for unlimited phrases**: Fine-tuned accent-specific TTS using StyleTTS2 or XTTS v2, trained on VCTK per accent. Used when user inputs custom text. Quality is clearly labeled as "AI reference" vs. "Human reference."
 
-**Streaming accent conversion** (stretch goal): Based on the 2025 Emformer-based streaming conversion paper, let the user hear their own recording converted to the target accent. The most powerful pedagogical tool — "this is what you said; this is what it would sound like native."
+**Streaming accent conversion** (stretch goal): Real-time voice conversion using a streaming encoder-decoder architecture (e.g., the approach from the kNN-VC or StreamVC line of work). Implementation complexity is high; defer until Phase 4 with a clear feasibility spike. The most powerful pedagogical tool — "this is what you said; this is what it would sound like native."
 
 ---
 
@@ -279,6 +303,7 @@ Per phoneme, per learner: FSRS algorithm (better than SM-2, open-source).
 | Component | Model | Source |
 |---|---|---|
 | Phoneme aligner & GOP | wav2vec2-large-robust-L2-english-phoneme | [slplab/HuggingFace](https://hf.co/slplab/wav2vec2-large-robust-L2-english-phoneme-recognition) |
+| Forced alignment | torchaudio.functional.forced_align (CTC-based) | PyTorch / torchaudio |
 | Accent embedding | WavLM-Large (fine-tuned on VCTK + L2-ARCTIC) | [microsoft/wavlm-large](https://hf.co/microsoft/wavlm-large) |
 | Pitch extraction | CREPE (CNN-based, robust to non-native) | marl/crepe (PyPI) |
 | Formant tracking | Parselmouth (Python Praat) | parselmouth (PyPI) |
@@ -320,6 +345,20 @@ Per phoneme, per learner: FSRS algorithm (better than SM-2, open-source).
 
 ---
 
+## Risks & Mitigations
+
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| slplab/wav2vec2-L2 model quality insufficient (only 1.6K downloads, limited validation) | Medium | Benchmark on speechocean762 before committing; fallback to allosaurus or MFA + wav2vec2 base |
+| CREPE pitch extraction too slow on CPU (Python, not ONNX) | Medium | Run CREPE asynchronously; use YAPPT or pYIN as fast fallback |
+| Parselmouth unavailable on Windows/ARM servers | Low | Wrap in a Docker container; formant extraction is a background job, not in the hot path |
+| StyleTTS2 / XTTS v2 license incompatibility | Medium | Verify commercial license before Phase 3; ElevenLabs API as fallback for TTS reference |
+| Claude API latency exceeds budget on cache miss | Low | Stream first token; show partial feedback while rest loads. Cache hit rate should be >70% for common phoneme errors |
+| L2-ARCTIC annotation quality: only 24 speakers across 6 L1s | Medium | Supplement with Common Voice accent-tagged data; use data augmentation (speed, pitch jitter) sparingly |
+| speechocean762 distribution mismatch: US English only | Medium | Separate regression head calibration per target accent; collect held-out eval data from RP/AuE speakers |
+
+---
+
 ## Phased Delivery
 
 ### Phase 1 — Core Engine (MVP, ~3 months)
@@ -328,6 +367,8 @@ Per phoneme, per learner: FSRS algorithm (better than SM-2, open-source).
 - 2 target accents (General American, RP British)
 - Claude-generated feedback per session
 - 50 curated phrases with human-recorded native audio (2 accents)
+- **Demo mode**: When `NEXT_PUBLIC_API_URL` is unset, the frontend fabricates plausible scores (normally distributed per dimension, phoneme timeline uses mock data) and uses the browser's Web Speech API for native playback. This preserves the full UI loop during frontend development without the ML backend.
+- **Content production for 50 phrases**: Record 2 native speakers per target accent (GA + RP) in a quiet environment at 48kHz. Phrases span: 10 minimal pairs, 15 phoneme-drill sentences, 15 connected speech / prosody-heavy sentences, 10 authentic excerpts. Each recording gets a reference phoneme alignment via MFA before being stored as the ground truth for DTW pitch comparison.
 - Basic IPA timeline visualization
 - User accounts + session history
 
