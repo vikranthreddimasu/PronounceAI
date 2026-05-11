@@ -39,7 +39,6 @@ async def lifespan(app: FastAPI):
     from app.models.phoneme_engine import PhonemeEngine
     from app.models.prosody_engine import ProsodyEngine
     from app.models.accent_distance import AccentDistanceEngine
-    from app.models.feedback_generator import FeedbackGenerator
 
     app.state.phoneme_engine = PhonemeEngine(
         model_id=WAV2VEC2_MODEL,
@@ -58,12 +57,29 @@ async def lifespan(app: FastAPI):
     )
     logger.info("Accent distance engine ready")
 
-    app.state.feedback_gen = FeedbackGenerator()
-    logger.info("Feedback generator ready")
-
     from app.models.whisper_engine import WhisperEngine
     app.state.whisper = WhisperEngine()
     logger.info("Whisper engine ready")
+
+    try:
+        from app.models.accent_converter import AccentConverter
+        # knn-vc bundled WavLM is incompatible with MPS (float64 ops). Force CPU.
+        app.state.accent_converter = AccentConverter(device="cpu")
+        logger.info("Accent converter ready")
+    except Exception as e:
+        logger.warning(f"Accent converter unavailable: {e}")
+        app.state.accent_converter = None
+
+    try:
+        from app.models.voice_clone import VoiceClone
+        # Whisper engine is loaded above; pass it so VoiceClone can validate
+        # instruct-mode output and fall back to VC when the LLM drifts.
+        app.state.voice_clone = VoiceClone(whisper_engine=app.state.whisper)
+        app.state.voice_clone.warmup()
+        logger.info("Voice clone engine ready")
+    except Exception as e:
+        logger.warning(f"Voice clone engine unavailable: {e}")
+        app.state.voice_clone = None
 
     logger.info("All models loaded — server ready")
     yield
@@ -82,8 +98,14 @@ app.add_middleware(
 
 from app.api.score import router as score_router
 from app.api.tts import router as tts_router
+from app.api.accent_convert import router as accent_convert_router
+from app.api.voice_enroll import router as voice_enroll_router
+from app.api.accent_clone import router as accent_clone_router
 app.include_router(score_router, prefix="/api")
 app.include_router(tts_router, prefix="/api")
+app.include_router(accent_convert_router, prefix="/api")
+app.include_router(voice_enroll_router, prefix="/api")
+app.include_router(accent_clone_router, prefix="/api")
 
 
 @app.get("/health")

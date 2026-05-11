@@ -1,5 +1,15 @@
-# Large datasets
+# Large datasets + user-generated audio (personal voice enrollments)
 librispeech/*
+backend/data/
+backend/checkpoints/
+
+# Audio artifacts (recorded clips, synth outputs, model weights)
+*.wav
+*.flac
+*.mp3
+*.pt
+*.ckpt
+*.safetensors
 
 # zip files
 *.zip

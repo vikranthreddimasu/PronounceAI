@@ -43,11 +43,64 @@ class WhisperEngine:
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300},
         )
+        return self._collect(segments, info, with_words=True)
+
+    def transcribe_fast(self, wav_np: np.ndarray) -> str:
+        """Lightweight transcription used for output validation.
+
+        Skips word timestamps + VAD, uses greedy decoding. ~2-3x faster than
+        the full `transcribe()` because we don't need word-level alignment —
+        we only need a text string to compare against an expected reference.
+        """
+        segments, _ = self.model.transcribe(
+            wav_np,
+            language="en",
+            word_timestamps=False,
+            vad_filter=False,
+            beam_size=1,
+            best_of=1,
+            temperature=0.0,
+            condition_on_previous_text=False,
+        )
+        return "".join(seg.text for seg in segments).strip()
+
+    def transcribe_with_words(self, wav_np: np.ndarray) -> dict:
+        """Greedy decode WITH word timestamps. Used by /api/voice/speak so the
+        client can highlight the active word during playback.
+
+        Faster than the full `transcribe()` (no beam search, no VAD) but still
+        emits per-word start/end times. Same single STT pass also serves as
+        the instruct-mode validation transcript.
+        """
+        segments, _ = self.model.transcribe(
+            wav_np,
+            language="en",
+            word_timestamps=True,
+            vad_filter=False,
+            beam_size=1,
+            best_of=1,
+            temperature=0.0,
+            condition_on_previous_text=False,
+        )
+        words = []
+        text = ""
+        for seg in segments:
+            text += seg.text
+            if seg.words:
+                for w in seg.words:
+                    words.append({
+                        "word": w.word,
+                        "start_ms": round(w.start * 1000),
+                        "end_ms": round(w.end * 1000),
+                    })
+        return {"text": text.strip(), "words": words}
+
+    def _collect(self, segments, info, *, with_words: bool) -> dict:
         words = []
         full_text = ""
         for seg in segments:
             full_text += seg.text
-            if seg.words:
+            if with_words and seg.words:
                 for w in seg.words:
                     words.append({
                         "word": w.word.strip(),

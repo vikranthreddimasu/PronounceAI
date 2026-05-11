@@ -1,0 +1,99 @@
+"""
+Native pitch (F0) reference for a (text, accent) pair.
+
+Pipeline:
+  1. Synthesise the phrase with Kokoro using the same voice as /api/tts.
+  2. Extract the F0 contour via the ProsodyEngine (Parselmouth, with pYIN fallback).
+  3. Cache the array so repeated playback of the same phrase pays the synthesis
+     cost exactly once.
+
+Returned as a numpy float32 array with 0.0 for unvoiced frames, plus the
+synthesised duration in milliseconds. Sample rate is matched to the prosody
+engine (16 kHz) by resampling the Kokoro output, which lets the same engine
+consume both user and native audio without an sr parameter on every call.
+"""
+from __future__ import annotations
+
+import logging
+from functools import lru_cache
+
+import numpy as np
+import resampy
+
+from app.models.prosody_engine import ProsodyEngine
+
+logger = logging.getLogger(__name__)
+
+KOKORO_SR = 24_000
+TARGET_SR = 16_000
+
+
+# Voice map mirrors app/api/tts.py — kept inline so this module has zero coupling
+# to the HTTP layer.
+_VOICE_MAP = {
+    "GA":       ("a", "af_heart"),
+    "RP":       ("b", "bf_emma"),
+    "AuE":      ("a", "af_bella"),
+    "Irish":    ("b", "bm_george"),
+    "Scottish": ("b", "bm_lewis"),
+    "IndianE":  ("a", "am_michael"),
+}
+
+
+@lru_cache(maxsize=2)
+def _get_pipeline(lang_code: str):
+    """Cached Kokoro pipeline — one per language code."""
+    from kokoro import KPipeline
+    logger.info(f"native_pitch: loading Kokoro lang_code={lang_code}")
+    return KPipeline(lang_code=lang_code)
+
+
+def _synth_to_16k(text: str, accent: str, speed: float) -> np.ndarray:
+    lang_code, voice = _VOICE_MAP.get(accent, _VOICE_MAP["GA"])
+    pipe = _get_pipeline(lang_code)
+    chunks: list[np.ndarray] = []
+    for _, _, audio in pipe(text, voice=voice, speed=speed):
+        if hasattr(audio, "detach"):
+            audio = audio.detach().cpu().numpy()
+        chunks.append(np.asarray(audio, dtype=np.float32))
+    if not chunks:
+        raise RuntimeError("Kokoro returned no audio")
+    wav24 = np.concatenate(chunks).astype(np.float32)
+    wav16 = resampy.resample(wav24, KOKORO_SR, TARGET_SR).astype(np.float32)
+    return wav16
+
+
+# Cache stores (f0_array, duration_ms). Keyed by (text[:200], accent, speed).
+_F0_CACHE: dict[tuple, tuple[np.ndarray, int]] = {}
+_MAX_CACHE = 512
+
+
+def get_native_f0(
+    text: str,
+    accent: str,
+    prosody_engine: ProsodyEngine,
+    speed: float = 0.9,
+) -> tuple[np.ndarray, int]:
+    """
+    Returns (f0_array, duration_ms) for the native rendition.
+    f0_array is float32, length matches the engine's Parselmouth output;
+    0.0 entries are unvoiced frames.
+    """
+    key = (text[:200], accent.upper(), round(speed, 2))
+    if key in _F0_CACHE:
+        return _F0_CACHE[key]
+
+    try:
+        wav16 = _synth_to_16k(text, accent.upper(), speed)
+    except Exception as e:
+        logger.warning(f"native_pitch: synth failed for accent={accent}: {e}")
+        return np.zeros(0, dtype=np.float32), 0
+
+    f0, _voiced = prosody_engine._extract_f0(wav16)
+    f0 = f0.astype(np.float32)
+    duration_ms = int(round(len(wav16) / TARGET_SR * 1000))
+
+    if len(_F0_CACHE) >= _MAX_CACHE:
+        _F0_CACHE.pop(next(iter(_F0_CACHE)))
+    _F0_CACHE[key] = (f0, duration_ms)
+    return f0, duration_ms

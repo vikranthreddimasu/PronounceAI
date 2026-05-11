@@ -22,11 +22,23 @@ export type FeedbackTip = {
   timestamp_ms?: number;
 };
 
+/**
+ * Pitch contour — F0 over time, z-score normalised within voiced frames.
+ * Same length for native + user so they overlay on a shared x-axis.
+ * Unvoiced frames are `null` (so the line breaks naturally).
+ */
+export type PitchContour = {
+  native: (number | null)[];
+  user: (number | null)[];
+  duration_ms: number;  // total span the contour represents
+};
+
 export type AssessmentResult = {
   phonemes: PhonemeResult[];
   scores: Scores;
-  feedback: FeedbackTip[];
+  feedback: FeedbackTip[];   // deprecated — kept for backwards compat; not rendered
   overall: number;
+  pitch_contour?: PitchContour;
 };
 
 export type Phrase = {

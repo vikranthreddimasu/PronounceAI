@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Fraunces } from "next/font/google";
+import { Inter, Fraunces, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import NavBar from "@/components/NavBar";
+import ThemeBoot from "@/components/ThemeBoot";
 
 const sans = Inter({
   variable: "--font-sans",
@@ -16,14 +18,21 @@ const display = Fraunces({
   display: "swap",
 });
 
+const mono = JetBrains_Mono({
+  variable: "--font-mono",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "PronounceAI — hear exactly what to fix",
+  title: "PronounceAI — speak any accent, with clarity",
   description:
-    "Speak a phrase. See which of clarity, pitch, or energy is the weak spot — with one targeted directive to fix it.",
+    "Phoneme-level pronunciation feedback. Hear yourself in any accent. Practice with intention.",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0e0d0c",
+  themeColor: "#f5f2ec",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -35,9 +44,16 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${sans.variable} ${display.variable} h-full antialiased`}
+      className={`${sans.variable} ${display.variable} ${mono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="relative min-h-dvh">{children}</body>
+      <body className="relative min-h-dvh">
+        <ThemeBoot />
+        <NavBar />
+        <div className="relative" style={{ zIndex: 1 }}>
+          {children}
+        </div>
+      </body>
     </html>
   );
 }

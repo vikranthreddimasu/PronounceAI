@@ -1,4 +1,4 @@
-import type { AssessmentResult, PhonemeResult, Scores } from "./types";
+import type { AssessmentResult, PhonemeResult, PitchContour, Scores } from "./types";
 
 // CMU-style ARPAbet phonemes for common words
 const PHONEME_MAP: Record<string, string[]> = {
@@ -128,15 +128,72 @@ function pickFeedback(phonemes: PhonemeResult[]): Array<{ text: string; timestam
   return tips.slice(0, 3);
 }
 
+/**
+ * Build a plausible pitch contour pair for the result view.
+ * Native: smooth declination + one accent peak per ~3 syllables.
+ * User:   native + low-freq drift + occasional offset blocks + jitter.
+ * Returns z-scored values; unvoiced frames are null so the line breaks.
+ */
+function mockPitchContour(phonemes: PhonemeResult[]): PitchContour {
+  const last = phonemes[phonemes.length - 1];
+  const duration_ms = (last?.end_ms ?? 1500) + 120;
+  const N = 80;
+  const native: (number | null)[] = new Array(N);
+  const user: (number | null)[] = new Array(N);
+
+  // Phrase-level declination (high → low over the utterance), plus 2–3 accent humps.
+  const accentCount = 2 + Math.floor(Math.random() * 2);
+  const accentCenters = Array.from({ length: accentCount }, (_, i) =>
+    (i + 0.7) / accentCount + (Math.random() - 0.5) * 0.08
+  );
+
+  // User drift — slow random walk biased by user's intonation skill (mock).
+  const driftAmp = 0.4 + Math.random() * 0.5;
+  const driftFreq = 1.2 + Math.random() * 1.2;
+  const driftPhase = Math.random() * Math.PI * 2;
+
+  // Random "offset zone" — user goes flat or wrong direction in one segment.
+  const flatStart = 0.25 + Math.random() * 0.35;
+  const flatLen = 0.12 + Math.random() * 0.15;
+  const flatBias = (Math.random() - 0.5) * 1.6;
+
+  for (let i = 0; i < N; i++) {
+    const t = i / (N - 1);
+
+    // Native shape
+    const declination = 1.0 - t * 1.6;
+    let accent = 0;
+    for (const c of accentCenters) {
+      const d = (t - c) / 0.08;
+      accent += Math.exp(-d * d) * 0.9;
+    }
+    const nz = declination + accent;
+
+    // User: drift + flat zone + small jitter
+    const drift = Math.sin(t * Math.PI * 2 * driftFreq + driftPhase) * driftAmp;
+    const inFlat = t > flatStart && t < flatStart + flatLen;
+    const flat = inFlat ? flatBias * (1 - Math.abs((t - flatStart - flatLen / 2) / (flatLen / 2))) : 0;
+    const jitter = (Math.random() - 0.5) * 0.18;
+    const uz = nz + drift * 0.55 + flat + jitter;
+
+    // Voicing gates — drop ~12% of frames as unvoiced (silence/consonants).
+    native[i] = Math.random() < 0.1 ? null : Number(nz.toFixed(3));
+    user[i] = Math.random() < 0.14 ? null : Number(uz.toFixed(3));
+  }
+
+  return { native, user, duration_ms };
+}
+
 export function generateMockResult(phraseText: string): AssessmentResult {
   const scores = mockScores();
   const phonemes = buildPhonemes(phraseText);
   const feedback = pickFeedback(phonemes);
+  const pitch_contour = mockPitchContour(phonemes);
   const overall = Math.round(
     scores.phoneme_accuracy * 0.35 +
     scores.intonation * 0.20 +
     scores.stress_rhythm * 0.15 +
     scores.vowel_quality * 0.30
   );
-  return { phonemes, scores, feedback, overall };
+  return { phonemes, scores, feedback, overall, pitch_contour };
 }

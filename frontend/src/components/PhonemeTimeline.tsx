@@ -37,7 +37,8 @@ export default function PhonemeTimeline({ phonemes }: Props) {
           return (
             <div
               key={i}
-              className="flex shrink-0 flex-col items-center gap-1"
+              className="phoneme-pip-wrap flex shrink-0 flex-col items-center gap-1 fade-pop"
+              style={{ animationDelay: `${Math.min(i * 28, 600)}ms` }}
               title={
                 p.correct
                   ? `/${p.phoneme}/ — correct`
@@ -48,7 +49,7 @@ export default function PhonemeTimeline({ phonemes }: Props) {
             >
               {/* Colour pip */}
               <span
-                className="flex items-center justify-center rounded"
+                className="phoneme-pip flex items-center justify-center rounded"
                 style={{
                   width: 28, height: 28,
                   background: color + "22",
@@ -58,6 +59,8 @@ export default function PhonemeTimeline({ phonemes }: Props) {
                   color: color,
                   fontWeight: 600,
                   lineHeight: 1,
+                  transition: "transform 180ms var(--ease-out), background 180ms var(--ease-out)",
+                  cursor: "pointer",
                 }}
               >
                 {p.phoneme}

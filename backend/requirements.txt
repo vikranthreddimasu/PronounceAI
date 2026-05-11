@@ -30,13 +30,9 @@ resampy==0.4.3
 # VAD
 onnxruntime==1.20.1
 
-# Caching / utilities
-cachetools==5.5.0
+# Utilities
 httpx==0.28.1
 python-dotenv==1.0.1
-
-# Fireworks.ai (OpenAI-compatible SDK)
-openai==1.57.4
 
 # HuggingFace Hub (for downloading models + datasets)
 huggingface-hub==0.27.0

@@ -67,3 +67,31 @@ export async function playNativeAudio(
     audio.play().catch(() => { URL.revokeObjectURL(audioUrl); resolve(); });
   });
 }
+
+/**
+ * Convert the user's recording into the target accent using kNN-VC on the backend.
+ * Returns a Blob (audio/wav). Caller is responsible for object-URL lifecycle.
+ * In mock mode this throws so the UI can show a "live only" hint.
+ */
+export async function convertAccent(
+  audioBlob: Blob,
+  accent: "GA" | "RP"
+): Promise<Blob> {
+  if (isMockMode()) {
+    throw new Error("Accent conversion requires the live backend (mock mode is off).");
+  }
+
+  const form = new FormData();
+  form.append("audio", audioBlob, "recording.webm");
+  form.append("accent", accent);
+
+  const res = await fetch(`${API_URL}/api/accent-convert`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`Accent conversion failed: ${msg}`);
+  }
+  return res.blob();
+}
