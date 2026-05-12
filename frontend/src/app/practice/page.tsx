@@ -1,24 +1,20 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import type { AppState, AssessmentResult, Accent, Scores } from "@/lib/types";
+import type { Accent, AssessmentResult, PhonemeResult, Scores } from "@/lib/types";
 import { PHRASES, CATEGORY_LABELS } from "@/lib/phrases";
 import { createRecorder, type Recorder } from "@/lib/recorder";
 import { scoreRecording, playNativeAudio, isMockMode } from "@/lib/api";
 import { useCountUp } from "@/lib/useCountUp";
 import { appendSession, getProfile, setProfile, subscribeStorage } from "@/lib/store";
 import { tap, confirm, release } from "@/lib/sounds";
-import RecordButton from "@/components/RecordButton";
 import PhonemeTimeline from "@/components/PhonemeTimeline";
 import ScoreBars from "@/components/ScoreBars";
 import PitchContourOverlay from "@/components/PitchContourOverlay";
 import PhonemeABDiff from "@/components/PhonemeABDiff";
 import AccentConvertCard from "@/components/AccentConvertCard";
 import EnrollmentModal from "@/components/EnrollmentModal";
-import Tabs, { type TabItem } from "@/components/Tabs";
-import VoiceStudio from "@/components/VoiceStudio";
 import SpokenText from "@/components/SpokenText";
 import {
   fetchVoiceProfile,
@@ -33,14 +29,14 @@ const ACCENT_LABELS: Record<Accent, string> = {
   RP: "Received Pronunciation",
 };
 
-type Mode = "phrases" | "free";
-type ResultTab = "overview" | "phonemes" | "prosody" | "accent";
+const MAX_TEXT = 180;
+const MIN_TEXT = 3;
 
-const MIN_FREE_LEN = 3;
-const MAX_FREE_LEN = 200;
+type CapturePhase = "idle" | "recording" | "processing";
+type SessionMode = "phrases" | "free";
 
-function sanitiseFree(text: string): string {
-  return text.replace(/[^\x20-\x7E]/g, "").slice(0, MAX_FREE_LEN);
+function sanitiseText(text: string): string {
+  return text.replace(/[^\x20-\x7E]/g, "").slice(0, MAX_TEXT);
 }
 
 function focusLabel(focus: string): string {
@@ -52,35 +48,74 @@ function focusLabel(focus: string): string {
     "weak-forms": "weak forms",
     "full-prosody": "full prosody",
     "connected-speech": "connected speech",
-    "stress-timing": "stress & timing",
+    "stress-timing": "stress and timing",
     "flap-t": "flap T",
     "consonant-cluster": "consonant clusters",
     "intonation-rise": "rising intonation",
     "falling-intonation": "falling intonation",
     "emphatic-stress": "emphatic stress",
     "polite-intonation": "polite intonation",
-    "narrative-pace": "pace & rhythm",
+    "narrative-pace": "pace and rhythm",
   };
   return map[focus] ?? focus.replace(/-/g, " ");
 }
 
-function verdictLabel(score: number): string {
-  if (score >= 90) return "Native-level";
-  if (score >= 80) return "Strong";
-  if (score >= 70) return "Getting there";
-  if (score >= 55) return "Building";
-  return "Keep going";
+function weakestPhoneme(phonemes: PhonemeResult[]): PhonemeResult | null {
+  if (phonemes.length === 0) return null;
+  const errors = phonemes.filter((p) => !p.correct);
+  const pool = errors.length ? errors : phonemes;
+  return pool.reduce((worst, p) => (p.gop < worst.gop ? p : worst), pool[0]);
 }
 
-function pickInitialTab(scores: Scores): ResultTab {
-  const entries: { key: keyof Scores; tab: ResultTab; v: number }[] = [
-    { key: "phoneme_accuracy", tab: "phonemes", v: scores.phoneme_accuracy },
-    { key: "intonation", tab: "prosody", v: scores.intonation },
-    { key: "stress_rhythm", tab: "prosody", v: scores.stress_rhythm },
-    { key: "vowel_quality", tab: "phonemes", v: scores.vowel_quality },
-  ];
-  entries.sort((a, b) => a.v - b.v);
-  return entries[0].tab;
+function lowestDimension(scores: Scores): [keyof Scores, number] {
+  return (Object.entries(scores) as Array<[keyof Scores, number]>).sort((a, b) => a[1] - b[1])[0];
+}
+
+function dimensionLabel(key: keyof Scores): string {
+  return {
+    phoneme_accuracy: "sound placement",
+    intonation: "pitch movement",
+    stress_rhythm: "stress rhythm",
+    vowel_quality: "vowel shape",
+  }[key];
+}
+
+function resultSentence(result: AssessmentResult, weak: PhonemeResult | null): string {
+  const [key, value] = lowestDimension(result.scores);
+  if (weak && key !== "intonation" && key !== "stress_rhythm") {
+    const heard = weak.substitution ? ` It sounded closer to ${weak.substitution.split("→")[0]}.` : "";
+    return `Start with /${weak.expected}/.${heard}`;
+  }
+  return `Start with ${dimensionLabel(key)}. It is the lowest signal at ${Math.round(value)}%.`;
+}
+
+function stateCopy(phase: CapturePhase, hasResult: boolean): { label: string; title: string; copy: string } {
+  if (phase === "recording") {
+    return {
+      label: "Listening",
+      title: "Recording your take",
+      copy: "Finish the sentence, then stop. The notebook will score the same line.",
+    };
+  }
+  if (phase === "processing") {
+    return {
+      label: "Analyzing",
+      title: "Reading the acoustics",
+      copy: "Aligning phonemes, pitch, rhythm, and transcript into one correction.",
+    };
+  }
+  if (hasResult) {
+    return {
+      label: "Reviewed",
+      title: "One correction is ready",
+      copy: "Try the same line again, or open the acoustic notes if you want the full trace.",
+    };
+  }
+  return {
+    label: "Ready",
+    title: "Work on this line",
+    copy: "Hear the target if useful, then record one natural take.",
+  };
 }
 
 export default function PracticePage() {
@@ -93,526 +128,453 @@ export default function PracticePage() {
 
 function PracticeInner() {
   const searchParams = useSearchParams();
-  const [mode, setMode] = useState<Mode>("phrases");
+  const initialPhrase = PHRASES[0];
   const [phraseIdx, setPhraseIdx] = useState(0);
-  const [freeText, setFreeText] = useState("");
+  const [selectedPhraseId, setSelectedPhraseId] = useState<string | null>(initialPhrase.id);
+  const [text, setText] = useState(initialPhrase.text);
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourceQuery, setSourceQuery] = useState("");
   const [accent, setAccent] = useState<Accent>("GA");
-  const [appState, setAppState] = useState<AppState>({ phase: "idle" });
+  const [phase, setPhase] = useState<CapturePhase>("idle");
+  const [result, setResult] = useState<AssessmentResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isPlayingNative, setIsPlayingNative] = useState(false);
+  const [isPlayingTarget, setIsPlayingTarget] = useState(false);
   const [userAudioUrl, setUserAudioUrl] = useState<string | null>(null);
   const [userAudioBlob, setUserAudioBlob] = useState<Blob | null>(null);
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
   const [enrollmentOpen, setEnrollmentOpen] = useState(false);
-  const [resultTab, setResultTab] = useState<ResultTab>("overview");
   const [hearInVoiceState, setHearInVoiceState] = useState<"idle" | "loading" | "playing">("idle");
   const [hearInVoiceWords, setHearInVoiceWords] = useState<WordTiming[]>([]);
+
   const recorderRef = useRef<Recorder | null>(null);
   const userAudioRef = useRef<HTMLAudioElement | null>(null);
+  const userAudioUrlRef = useRef<string | null>(null);
   const hearInVoiceRef = useRef<HTMLAudioElement | null>(null);
   const hearInVoiceUrlRef = useRef<string | null>(null);
 
-  // Sync accent with stored profile on mount.
+  const cleanText = text.trim();
+  const selectedPhrase = selectedPhraseId ? PHRASES.find((p) => p.id === selectedPhraseId) ?? null : null;
+  const mode: SessionMode = selectedPhrase && selectedPhrase.text === cleanText ? "phrases" : "free";
+  const canRecord = cleanText.length >= MIN_TEXT;
+  const weak = useMemo(() => (result ? weakestPhoneme(result.phonemes) : null), [result]);
+  const lowest = useMemo(() => (result ? lowestDimension(result.scores) : null), [result]);
+  const sessionState = stateCopy(phase, !!result);
+  const progressPct = ((phraseIdx + 1) / PHRASES.length) * 100;
+
+  const clearRecording = useCallback(() => {
+    if (userAudioUrlRef.current) {
+      URL.revokeObjectURL(userAudioUrlRef.current);
+      userAudioUrlRef.current = null;
+    }
+    setUserAudioUrl(null);
+    setUserAudioBlob(null);
+  }, []);
+
   useEffect(() => {
-    const p = getProfile();
-    setAccent(p.targetAccent);
+    const profile = getProfile();
+    setAccent(profile.targetAccent);
     return subscribeStorage(() => setAccent(getProfile().targetAccent));
   }, []);
 
-  // Honour ?phrase=ID from Library deep links.
   useEffect(() => {
     const id = searchParams.get("phrase");
     if (!id) return;
     const idx = PHRASES.findIndex((p) => p.id === id);
     if (idx >= 0) {
-      setMode("phrases");
+      const phrase = PHRASES[idx];
       setPhraseIdx(idx);
+      setSelectedPhraseId(phrase.id);
+      setText(phrase.text);
+      setResult(null);
+      setSourceOpen(false);
+      clearRecording();
     }
-  }, [searchParams]);
-
-  const activeText = mode === "free" ? freeText.trim() : PHRASES[phraseIdx].text;
-  const activePhrase = mode === "phrases" ? PHRASES[phraseIdx] : null;
-  const activeFocus = mode === "free" ? null : PHRASES[phraseIdx].focus;
-  const canRecord = mode === "free" ? activeText.length >= MIN_FREE_LEN : true;
-
-  const result = appState.phase === "result" ? appState.result : null;
-  const isRecording = appState.phase === "recording";
-  const isProcessing = appState.phase === "processing";
-
-  useEffect(() => {
-    return () => {
-      recorderRef.current?.dispose();
-      if (userAudioUrl) URL.revokeObjectURL(userAudioUrl);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams, clearRecording]);
 
   useEffect(() => {
     const id = getOrCreateVoiceId();
-    if (!id) return;
     fetchVoiceProfile(id)
-      .then((p) => setVoiceProfile(p))
+      .then((profile) => setVoiceProfile(profile))
       .catch(() => setVoiceProfile(null));
   }, []);
 
   useEffect(() => {
-    setAppState({ phase: "idle" });
-    setError(null);
-    if (userAudioUrl) {
-      URL.revokeObjectURL(userAudioUrl);
-      setUserAudioUrl(null);
-    }
-    setUserAudioBlob(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phraseIdx, accent, mode]);
+    return () => {
+      recorderRef.current?.dispose();
+      if (userAudioUrlRef.current) URL.revokeObjectURL(userAudioUrlRef.current);
+      if (hearInVoiceUrlRef.current) URL.revokeObjectURL(hearInVoiceUrlRef.current);
+    };
+  }, []);
 
-  const getLevel = useCallback(() => recorderRef.current?.getLevel() ?? null, []);
+  const sourceList = useMemo(() => {
+    const q = sourceQuery.trim().toLowerCase();
+    if (q) {
+      return PHRASES.filter(
+        (phrase) =>
+          phrase.text.toLowerCase().includes(q) ||
+          phrase.focus.toLowerCase().includes(q) ||
+          CATEGORY_LABELS[phrase.category].toLowerCase().includes(q)
+      ).slice(0, 10);
+    }
+    return Array.from({ length: 8 }, (_, offset) => PHRASES[(phraseIdx + offset) % PHRASES.length]);
+  }, [phraseIdx, sourceQuery]);
+
+  const applyPhrase = useCallback(
+    (id: string) => {
+      const idx = PHRASES.findIndex((p) => p.id === id);
+      if (idx < 0) return;
+      const phrase = PHRASES[idx];
+      tap();
+      setPhraseIdx(idx);
+      setSelectedPhraseId(phrase.id);
+      setText(phrase.text);
+      setResult(null);
+      setError(null);
+      setSourceOpen(false);
+      setHearInVoiceWords([]);
+      setHearInVoiceState("idle");
+      clearRecording();
+    },
+    [clearRecording]
+  );
+
+  const nextPhrase = useCallback(() => {
+    const next = PHRASES[(phraseIdx + 1) % PHRASES.length];
+    applyPhrase(next.id);
+  }, [applyPhrase, phraseIdx]);
+
+  const handleTextChange = useCallback(
+    (value: string) => {
+      setText(sanitiseText(value));
+      setSelectedPhraseId(null);
+      setResult(null);
+      setError(null);
+      setHearInVoiceWords([]);
+      setHearInVoiceState("idle");
+      clearRecording();
+    },
+    [clearRecording]
+  );
+
+  const toggleAccent = useCallback(() => {
+    const next = accent === "GA" ? "RP" : "GA";
+    tap();
+    setAccent(next);
+    setProfile({ targetAccent: next });
+    setResult(null);
+    setHearInVoiceWords([]);
+    setHearInVoiceState("idle");
+    clearRecording();
+  }, [accent, clearRecording]);
+
+  async function handlePlayTarget() {
+    if (isPlayingTarget || !cleanText) return;
+    tap();
+    setIsPlayingTarget(true);
+    await playNativeAudio(cleanText, accent);
+    setIsPlayingTarget(false);
+  }
 
   async function handleRecord() {
-    setError(null);
-    setAppState({ phase: "recording" });
+    if (!canRecord) {
+      setError(`Write at least ${MIN_TEXT} characters before recording.`);
+      return;
+    }
     tap();
+    setError(null);
+    setResult(null);
+    clearRecording();
+    setPhase("recording");
     try {
       if (!recorderRef.current) recorderRef.current = await createRecorder();
       await recorderRef.current.start();
     } catch (e) {
-      setError((e as Error).message ?? "Couldn't access microphone.");
-      setAppState({ phase: "idle" });
+      setError((e as Error).message ?? "Could not access the microphone.");
+      setPhase("idle");
     }
   }
 
   async function handleStop() {
     if (!recorderRef.current) return;
-    setAppState({ phase: "processing" });
     release();
+    setPhase("processing");
     try {
       const blob = await recorderRef.current.stop();
-      if (userAudioUrl) URL.revokeObjectURL(userAudioUrl);
       const url = URL.createObjectURL(blob);
+      userAudioUrlRef.current = url;
       setUserAudioUrl(url);
       setUserAudioBlob(blob);
-      const res: AssessmentResult = await scoreRecording(blob, activeText, accent);
-      setAppState({ phase: "result", result: res });
-      setResultTab(pickInitialTab(res.scores));
-      appendSession(res, { phrase: activeText, mode, accent });
+      const profile = getProfile();
+      const assessment = await scoreRecording(blob, cleanText, accent, profile.l1 ?? "unknown");
+      setResult(assessment);
+      appendSession(assessment, { phrase: cleanText, mode, accent });
+      setPhase("idle");
       confirm();
     } catch (e) {
-      setError((e as Error).message ?? "Something went wrong. Try again.");
-      setAppState({ phase: "idle" });
+      setError((e as Error).message ?? "Scoring failed. Try one more recording.");
+      setPhase("idle");
     }
   }
 
-  async function handlePlayNative() {
-    if (isPlayingNative || !activeText) return;
-    setIsPlayingNative(true);
-    tap();
-    await playNativeAudio(activeText, accent);
-    setIsPlayingNative(false);
-  }
-
-  async function handleHearInVoice() {
-    if (!voiceProfile || !activeText || hearInVoiceState !== "idle") return;
-    tap();
-    setHearInVoiceState("loading");
-    setHearInVoiceWords([]);
-    try {
-      const id = getOrCreateVoiceId();
-      const clip = await speakInVoice(id, activeText, accent);
-      if (hearInVoiceUrlRef.current) URL.revokeObjectURL(hearInVoiceUrlRef.current);
-      const url = URL.createObjectURL(clip.audio);
-      hearInVoiceUrlRef.current = url;
-      setHearInVoiceWords(clip.words);
-      if (!hearInVoiceRef.current) hearInVoiceRef.current = new Audio();
-      const a = hearInVoiceRef.current;
-      a.src = url;
-      a.currentTime = 0;
-      a.onended = () => setHearInVoiceState("idle");
-      a.onerror = () => setHearInVoiceState("idle");
-      setHearInVoiceState("playing");
-      a.play().catch(() => setHearInVoiceState("idle"));
-      confirm();
-    } catch (e) {
-      setError((e as Error).message ?? "Voice synthesis failed.");
-      setHearInVoiceState("idle");
+  async function handlePrimaryCapture() {
+    if (phase === "recording") {
+      await handleStop();
+      return;
+    }
+    if (phase !== "processing") {
+      await handleRecord();
     }
   }
 
-  const playNativeFromPanel = useCallback(
-    () => playNativeAudio(activeText, accent),
-    [activeText, accent]
-  );
+  const playTargetFromPanel = useCallback(() => playNativeAudio(cleanText, accent), [accent, cleanText]);
 
   const playUserRecording = useCallback((): Promise<void> => {
     if (!userAudioUrl) return Promise.resolve();
     return new Promise((resolve) => {
       if (!userAudioRef.current) userAudioRef.current = new Audio();
-      const a = userAudioRef.current;
-      a.src = userAudioUrl;
-      a.currentTime = 0;
-      a.onended = () => resolve();
-      a.onerror = () => resolve();
-      a.play().catch(() => resolve());
+      const audio = userAudioRef.current;
+      audio.src = userAudioUrl;
+      audio.currentTime = 0;
+      audio.onended = () => resolve();
+      audio.onerror = () => resolve();
+      audio.play().catch(() => resolve());
     });
   }, [userAudioUrl]);
 
-  const onAccentChange = useCallback((a: Accent) => {
+  async function handleHearInVoice() {
+    if (!cleanText || hearInVoiceState !== "idle") return;
     tap();
-    setAccent(a);
-    setProfile({ targetAccent: a });
-  }, []);
-
-  const tabs: TabItem<ResultTab>[] = useMemo(
-    () => [
-      { id: "overview", label: "Overview" },
-      { id: "phonemes", label: "Phonemes", count: result?.phonemes.filter((p) => !p.correct).length },
-      { id: "prosody", label: "Prosody" },
-      { id: "accent", label: "Accent" },
-    ],
-    [result]
-  );
+    if (!voiceProfile) {
+      setEnrollmentOpen(true);
+      return;
+    }
+    setHearInVoiceState("loading");
+    setHearInVoiceWords([]);
+    try {
+      const id = getOrCreateVoiceId();
+      const clip = await speakInVoice(id, cleanText, accent);
+      if (hearInVoiceUrlRef.current) URL.revokeObjectURL(hearInVoiceUrlRef.current);
+      const url = URL.createObjectURL(clip.audio);
+      hearInVoiceUrlRef.current = url;
+      setHearInVoiceWords(clip.words);
+      if (!hearInVoiceRef.current) hearInVoiceRef.current = new Audio();
+      const audio = hearInVoiceRef.current;
+      audio.src = url;
+      audio.currentTime = 0;
+      audio.onended = () => setHearInVoiceState("idle");
+      audio.onerror = () => setHearInVoiceState("idle");
+      setHearInVoiceState("playing");
+      audio.play().catch(() => setHearInVoiceState("idle"));
+      confirm();
+    } catch (e) {
+      setError((e as Error).message ?? "Voice rendering failed.");
+      setHearInVoiceState("idle");
+    }
+  }
 
   return (
-    <main
-      className="mx-auto"
-      style={{ maxWidth: 1180, padding: "32px 20px 80px" }}
-    >
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: "minmax(0, 1fr)",
-          gap: 32,
-        }}
-      >
-        {/* ── Header row ── */}
-        <header className="flex flex-wrap items-end justify-between" style={{ gap: 16 }}>
+    <main className="notebook-session">
+      <section className="session-notebook" aria-label="Pronunciation session notebook">
+        <header className="workspace-bar">
           <div>
-            <p
-              className="font-mono"
-              style={{
-                fontSize: 11,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--ink-4)",
-              }}
-            >
-              {mode === "free" ? "Free speak" : activePhrase ? CATEGORY_LABELS[activePhrase.category] : ""}
-              {activeFocus && (
-                <span style={{ marginLeft: 10, color: "var(--accent)" }}>
-                  · {focusLabel(activeFocus)}
-                </span>
-              )}
-            </p>
-            <h1
-              className="font-display"
-              style={{
-                fontSize: 28,
-                fontWeight: 700,
-                color: "var(--ink)",
-                marginTop: 6,
-                letterSpacing: "-0.02em",
-              }}
-            >
-              {mode === "phrases"
-                ? `Phrase ${phraseIdx + 1} of ${PHRASES.length}`
-                : "Say anything"}
-            </h1>
+            <p className="eyebrow">Pronunciation notebook</p>
+            <h1>{sessionState.label}</h1>
           </div>
-
-          <div className="flex items-center" style={{ gap: 10 }}>
-            {/* Mode toggle */}
-            <div className="tab-bar" role="tablist" aria-label="Practice mode">
-              {(["phrases", "free"] as Mode[]).map((m) => (
-                <button
-                  key={m}
-                  className="tab-btn press"
-                  data-active={mode === m}
-                  onClick={() => {
-                    if (mode === m) return;
-                    tap();
-                    setMode(m);
-                  }}
-                >
-                  {m === "phrases" ? "Phrases" : "Free"}
-                </button>
-              ))}
-            </div>
-
-            {/* Accent toggle */}
-            <div className="tab-bar" role="tablist" aria-label="Target accent">
-              {(["GA", "RP"] as Accent[]).map((a) => (
-                <button
-                  key={a}
-                  className="tab-btn press"
-                  data-active={accent === a}
-                  onClick={() => onAccentChange(a)}
-                  title={ACCENT_LABELS[a]}
-                >
-                  {a}
-                </button>
-              ))}
-            </div>
+          <div className="workspace-status">
+            <span>{isMockMode() ? "Demo scorer" : "Live scorer"}</span>
+            <button className="status-button press" onClick={toggleAccent} disabled={phase !== "idle"}>
+              {ACCENT_LABELS[accent]}
+            </button>
           </div>
         </header>
 
-        {/* Phrase progress (phrases mode only) */}
-        {mode === "phrases" && (
-          <div className="dim-track" style={{ height: 4 }}>
-            <div
-              className="dim-fill"
-              style={{
-                ["--pct" as string]: `${((phraseIdx + 1) / PHRASES.length) * 100}%`,
-                ["--tone" as string]: "var(--accent)",
-                ["--delay" as string]: "0ms",
-              } as React.CSSProperties}
-            />
-          </div>
-        )}
-
-        {/* ── Phrase card ── */}
-        <section
-          className="card-paper"
-          style={{ padding: "40px 32px", textAlign: "center" }}
-        >
-          {mode === "phrases" ? (
-            <p
-              key={phraseIdx}
-              className="font-display phrase-mount"
-              style={{
-                fontSize: result ? 24 : 34,
-                fontWeight: 600,
-                color: "var(--ink)",
-                lineHeight: 1.2,
-                margin: "0 auto",
-                maxWidth: 720,
-                transition: "font-size 400ms var(--ease-paper)",
-              }}
-            >
-              {activeText}
-            </p>
-          ) : (
-            <textarea
-              value={freeText}
-              onChange={(e) => setFreeText(sanitiseFree(e.target.value))}
-              disabled={isRecording || isProcessing}
-              placeholder="Type any English sentence you want to practice…"
-              rows={result ? 2 : 3}
-              className="font-display phrase-mount"
-              style={{
-                fontSize: result ? 22 : 28,
-                fontWeight: 600,
-                color: "var(--ink)",
-                lineHeight: 1.3,
-                width: "100%",
-                maxWidth: 720,
-                background: "transparent",
-                border: "none",
-                outline: "none",
-                resize: "none",
-                textAlign: "center",
-                padding: "8px 4px",
-                margin: "0 auto",
-                display: "block",
-                transition: "font-size 400ms var(--ease-paper)",
-              }}
-              maxLength={MAX_FREE_LEN}
-            />
-          )}
-
-          <div className="flex flex-wrap items-center justify-center" style={{ gap: 10, marginTop: 20 }}>
-            <button
-              className="btn-paper btn-ghost press"
-              onClick={handlePlayNative}
-              disabled={isPlayingNative || isRecording || isProcessing || !activeText}
-              style={{ fontSize: 12, color: isPlayingNative ? "var(--accent)" : "var(--ink-3)" }}
-            >
-              <span aria-hidden style={{ fontSize: 10 }}>{isPlayingNative ? "♪" : "▶"}</span>
-              {isPlayingNative ? "Playing…" : `Native ${accent}`}
-              {isMockMode() && <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 4 }}>browser</span>}
-            </button>
-            {voiceProfile && (
-              <button
-                className="btn-paper btn-ghost press"
-                onClick={handleHearInVoice}
-                disabled={hearInVoiceState !== "idle" || isRecording || isProcessing || !activeText}
-                style={{
-                  fontSize: 12,
-                  color: hearInVoiceState === "playing" ? "var(--accent)" : "var(--ink-3)",
-                }}
-              >
-                <span aria-hidden style={{ fontSize: 10 }}>
-                  {hearInVoiceState === "playing" ? "♪" : hearInVoiceState === "loading" ? "…" : "▶"}
-                </span>
-                {hearInVoiceState === "playing"
-                  ? "Your voice…"
-                  : hearInVoiceState === "loading"
-                  ? "Synthesising…"
-                  : `Your voice · ${accent}`}
-              </button>
-            )}
-            <Link
-              href={`/studio?text=${encodeURIComponent(activeText)}`}
-              onClick={() => tap()}
-              className="btn-paper btn-ghost press"
-              style={{ fontSize: 12, color: "var(--ink-4)", textDecoration: "none" }}
-            >
-              Open in Studio →
-            </Link>
-          </div>
-
-          {/* Live word highlight when your-voice plays */}
-          {hearInVoiceWords.length > 0 && hearInVoiceState !== "idle" && (
-            <div
-              className="card-paper-inset fade-pop"
-              style={{ padding: "14px 18px", marginTop: 16, maxWidth: 640, width: "100%" }}
-            >
-              <p
-                className="font-mono"
-                style={{
-                  fontSize: 10,
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
-                  color: "var(--accent)",
-                  marginBottom: 8,
-                }}
-              >
-                Your voice · {accent}
-              </p>
-              <SpokenText
-                words={hearInVoiceWords}
-                audio={hearInVoiceRef.current}
-                playing={hearInVoiceState === "playing"}
-                size="md"
-              />
+        <div className="notebook-thread">
+          <article className="coach-message">
+            <span className="coach-avatar" aria-hidden>
+              AI
+            </span>
+            <div>
+              <p className="eyebrow">Coach</p>
+              <h2>{sessionState.title}</h2>
+              <p>{sessionState.copy}</p>
             </div>
-          )}
-        </section>
+          </article>
 
-        {/* ── Record zone ── */}
-        <section className="flex flex-col items-center" style={{ gap: 14 }}>
-          {!result && !isRecording && !isProcessing && mode === "free" && !canRecord && (
-            <p
-              className="rise"
-              style={{ fontSize: 12, color: "var(--ink-4)" }}
-            >
-              {MIN_FREE_LEN}+ characters
-            </p>
-          )}
-          {isProcessing && (
-            <p style={{ fontSize: 13, color: "var(--ink-3)", fontStyle: "italic" }}>Analysing…</p>
-          )}
+          <article className="line-note">
+            <header className="line-note-header">
+              <div>
+                <p className="eyebrow">Current line</p>
+                <span>
+                  {selectedPhrase
+                    ? `${CATEGORY_LABELS[selectedPhrase.category]} · ${focusLabel(selectedPhrase.focus)}`
+                    : `${cleanText.length}/${MAX_TEXT} characters`}
+                </span>
+              </div>
+              <button
+                className="notebook-link press"
+                onClick={() => setSourceOpen((open) => !open)}
+                disabled={phase !== "idle"}
+                aria-expanded={sourceOpen}
+              >
+                {sourceOpen ? "Done" : "Change"}
+              </button>
+            </header>
 
-          <RecordButton
-            state={isRecording ? "recording" : isProcessing ? "processing" : "idle"}
-            onRecord={canRecord ? handleRecord : () => {}}
-            onStop={handleStop}
-            getLevel={getLevel}
-          />
+            <textarea
+              value={text}
+              onChange={(e) => handleTextChange(e.target.value)}
+              disabled={phase !== "idle"}
+              className="notebook-line"
+              rows={2}
+              aria-label="Practice line"
+              placeholder="Write a short English line."
+            />
+
+            {selectedPhrase && (
+              <div className="notebook-progress" aria-hidden>
+                <span style={{ width: `${progressPct}%` }} />
+              </div>
+            )}
+
+            <footer className="line-note-footer">
+              <span>{mode === "free" ? "Custom line" : `Line ${phraseIdx + 1} of ${PHRASES.length}`}</span>
+              <span>{ACCENT_LABELS[accent]}</span>
+            </footer>
+
+            {sourceOpen && (
+              <div className="notebook-source" aria-label="Phrase source">
+                <input
+                  value={sourceQuery}
+                  onChange={(e) => setSourceQuery(e.target.value)}
+                  className="notebook-source-search"
+                  placeholder="Search sound or phrase"
+                  aria-label="Search phrases"
+                />
+                <div>
+                  {sourceList.map((phrase) => (
+                    <button
+                      key={phrase.id}
+                      className="notebook-source-row press"
+                      onClick={() => applyPhrase(phrase.id)}
+                      aria-current={phrase.id === selectedPhraseId ? "true" : undefined}
+                    >
+                      <span>{phrase.text}</span>
+                      <small>{focusLabel(phrase.focus)}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </article>
 
           {error && (
-            <p
-              className="rounded-xl"
-              style={{
-                fontSize: 12,
-                maxWidth: 360,
-                background: "rgba(184, 82, 63, 0.08)",
-                color: "var(--rose)",
-                border: "1px solid rgba(184, 82, 63, 0.20)",
-                padding: "10px 14px",
-                textAlign: "center",
-              }}
-            >
+            <p className="session-error" role="alert">
               {error}
             </p>
           )}
-        </section>
 
-        {/* ── Result ── */}
-        {result && (
-          <section className="result-enter flex flex-col" style={{ gap: 24 }}>
-            <div className="flex items-center justify-center">
-              <Tabs items={tabs} active={resultTab} onChange={setResultTab} ariaLabel="Result view" />
-            </div>
-
-            <div
-              className="card-paper"
-              style={{ padding: "28px 28px 24px", minHeight: 320 }}
-            >
-              {resultTab === "overview" && (
-                <div className="grid" style={{ gap: 28, gridTemplateColumns: "minmax(0, 1fr)" }}>
-                  <ScoreHero overall={result.overall} verdict={verdictLabel(result.overall)} />
-                  <ScoreBars scores={result.scores} overall={result.overall} />
-                </div>
-              )}
-
-              {resultTab === "phonemes" && (
-                <div className="flex flex-col" style={{ gap: 24 }}>
-                  <PhonemeTimeline phonemes={result.phonemes} />
-                  <PhonemeABDiff
-                    phonemes={result.phonemes}
-                    onPlayNative={playNativeFromPanel}
-                    onPlayUser={playUserRecording}
-                    hasUserAudio={!!userAudioUrl}
-                  />
-                </div>
-              )}
-
-              {resultTab === "prosody" && (
-                <div className="flex flex-col" style={{ gap: 20 }}>
-                  {result.pitch_contour ? (
-                    <PitchContourOverlay
-                      contour={result.pitch_contour}
-                      onPlayNative={playNativeFromPanel}
-                      onPlayUser={playUserRecording}
-                      hasUserAudio={!!userAudioUrl}
-                    />
-                  ) : (
-                    <p style={{ color: "var(--ink-3)", fontSize: 13 }}>
-                      Pitch contour unavailable for this recording.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {resultTab === "accent" && (
-                <AccentConvertCard
-                  userAudio={userAudioBlob}
-                  accent={accent}
-                  voiceProfile={voiceProfile}
-                  onOpenEnrollment={() => setEnrollmentOpen(true)}
+          {(hearInVoiceState !== "idle" || hearInVoiceWords.length > 0) && (
+            <article className="voice-preview-note">
+              <p className="eyebrow">Your voice</p>
+              {hearInVoiceState === "loading" ? (
+                <p>Rendering this line in your enrolled voice.</p>
+              ) : hearInVoiceWords.length > 0 ? (
+                <SpokenText
+                  words={hearInVoiceWords}
+                  audio={hearInVoiceRef.current}
+                  playing={hearInVoiceState === "playing"}
                 />
+              ) : (
+                <p>Ready to play your synthesized voice.</p>
               )}
-            </div>
+            </article>
+          )}
 
-            <div className="flex flex-wrap" style={{ gap: 12, justifyContent: "center" }}>
-              <button
-                className="btn-paper press"
-                onClick={() => {
-                  tap();
-                  setAppState({ phase: "idle" });
-                  setError(null);
-                }}
-              >
-                Try again
-              </button>
-              <button
-                className="btn-paper btn-primary press"
-                onClick={() => {
-                  tap();
-                  if (mode === "free") {
-                    setFreeText("");
-                    setAppState({ phase: "idle" });
-                    setError(null);
-                  } else {
-                    setPhraseIdx((i) => (i + 1) % PHRASES.length);
-                  }
-                }}
-              >
-                {mode === "free" ? "Clear" : "Next phrase →"}
-              </button>
+          {result && (
+            <Review
+              result={result}
+              weak={weak}
+              lowest={lowest}
+              accent={accent}
+              userAudioBlob={userAudioBlob}
+              userAudioUrl={userAudioUrl}
+              voiceProfile={voiceProfile}
+              hearInVoiceState={hearInVoiceState}
+              hearInVoiceWords={hearInVoiceWords}
+              hearInVoiceRef={hearInVoiceRef.current}
+              onPlayTarget={playTargetFromPanel}
+              onPlayUser={playUserRecording}
+              onTryAgain={() => {
+                tap();
+                setResult(null);
+                clearRecording();
+              }}
+              onNextLine={nextPhrase}
+              onHearInVoice={handleHearInVoice}
+              onOpenEnrollment={() => setEnrollmentOpen(true)}
+            />
+          )}
+        </div>
+
+        <footer className="capture-composer" data-state={phase}>
+          <div className="composer-state">
+            <span className="state-dot" aria-hidden />
+            <div>
+              <strong>{sessionState.label}</strong>
+              <p>{phase === "idle" && result ? "Record again when you are ready." : sessionState.copy}</p>
             </div>
-          </section>
-        )}
-      </div>
+          </div>
+          <div className="composer-actions">
+            <button
+              className="composer-secondary press"
+              onClick={handlePlayTarget}
+              disabled={!cleanText || isPlayingTarget || phase !== "idle"}
+            >
+              {isPlayingTarget ? "Playing" : "Hear target"}
+            </button>
+            <button
+              className="composer-secondary press"
+              onClick={handleHearInVoice}
+              disabled={!cleanText || phase !== "idle" || hearInVoiceState !== "idle"}
+            >
+              {!voiceProfile
+                ? "Set up my voice"
+                : hearInVoiceState === "loading"
+                ? "Rendering"
+                : hearInVoiceState === "playing"
+                ? "Playing voice"
+                : "Hear my voice"}
+            </button>
+            {result && (
+              <button className="composer-secondary press" onClick={nextPhrase} disabled={phase !== "idle"}>
+                Next line
+              </button>
+            )}
+            <button
+              className="primary-capture press"
+              onClick={handlePrimaryCapture}
+              disabled={phase === "processing" || !canRecord}
+            >
+              {phase === "processing" ? (
+                <Spinner />
+              ) : phase === "recording" ? (
+                <StopIcon />
+              ) : (
+                <MicIcon />
+              )}
+              <span>
+                {phase === "recording"
+                  ? "Stop and score"
+                  : phase === "processing"
+                  ? "Analyzing"
+                  : result
+                  ? "Record again"
+                  : "Record take"}
+              </span>
+            </button>
+          </div>
+        </footer>
+      </section>
 
       <EnrollmentModal
         open={enrollmentOpen}
@@ -623,82 +585,201 @@ function PracticeInner() {
   );
 }
 
-function ScoreHero({ overall, verdict }: { overall: number; verdict: string }) {
-  const color =
-    overall >= 80 ? "var(--jade)" : overall >= 65 ? "var(--accent)" : "var(--rose)";
-  const animated = useCountUp(overall, 1100);
-  const pct = animated / 100;
-  const R = 42;
-  const C = 2 * Math.PI * R;
-  const dashOffset = C * (1 - pct);
+function Review({
+  result,
+  weak,
+  lowest,
+  accent,
+  userAudioBlob,
+  userAudioUrl,
+  voiceProfile,
+  hearInVoiceState,
+  hearInVoiceWords,
+  hearInVoiceRef,
+  onPlayTarget,
+  onPlayUser,
+  onTryAgain,
+  onNextLine,
+  onHearInVoice,
+  onOpenEnrollment,
+}: {
+  result: AssessmentResult;
+  weak: PhonemeResult | null;
+  lowest: [keyof Scores, number] | null;
+  accent: Accent;
+  userAudioBlob: Blob | null;
+  userAudioUrl: string | null;
+  voiceProfile: VoiceProfile | null;
+  hearInVoiceState: "idle" | "loading" | "playing";
+  hearInVoiceWords: WordTiming[];
+  hearInVoiceRef: HTMLAudioElement | null;
+  onPlayTarget: () => Promise<void>;
+  onPlayUser: () => Promise<void> | void;
+  onTryAgain: () => void;
+  onNextLine: () => void;
+  onHearInVoice: () => void;
+  onOpenEnrollment: () => void;
+}) {
+  const animated = useCountUp(result.overall, 700);
+  const [lowestKey, lowestValue] = lowest ?? ["phoneme_accuracy", result.scores.phoneme_accuracy];
 
   return (
-    <div className="flex items-center" style={{ gap: 28 }}>
-      <div
-        style={{
-          width: 108,
-          height: 108,
-          flexShrink: 0,
-          position: "relative",
-        }}
-      >
-        <svg width="108" height="108" viewBox="0 0 108 108" style={{ position: "absolute", inset: 0 }}>
-          <circle cx="54" cy="54" r={R} fill={color} opacity="0.10" />
-          <circle cx="54" cy="54" r={R} fill="none" stroke="var(--line)" strokeWidth={2.5} opacity="0.7" />
-          <circle
-            cx="54"
-            cy="54"
-            r={R}
-            fill="none"
-            stroke={color}
-            strokeWidth={3.5}
-            strokeLinecap="round"
-            strokeDasharray={C}
-            strokeDashoffset={dashOffset}
-            transform="rotate(-90 54 54)"
-          />
-        </svg>
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center"
-          style={{ pointerEvents: "none" }}
-        >
-          <span
-            className="font-display"
-            style={{
-              fontSize: 36,
-              fontWeight: 700,
-              color,
-              fontVariantNumeric: "tabular-nums",
-              lineHeight: 1,
-            }}
-          >
-            {Math.round(animated)}
-          </span>
-          <span
-            className="font-mono"
-            style={{
-              fontSize: 9,
-              fontWeight: 600,
-              letterSpacing: "0.1em",
-              color,
-              textTransform: "uppercase",
-              opacity: 0.7,
-              marginTop: 4,
-            }}
-          >
-            / 100
-          </span>
+    <section className="review-message" aria-label="Session review">
+      <article className="coach-message result-message">
+        <span className="coach-avatar" aria-hidden>
+          {Math.round(animated)}
+        </span>
+        <div>
+          <p className="eyebrow">Coach response</p>
+          <h2>{resultSentence(result, weak)}</h2>
+          <p>
+            Lowest signal: {dimensionLabel(lowestKey)} at {Math.round(lowestValue)}%.
+            {weak ? ` Focus on /${weak.expected}/ before chasing the total score.` : ""}
+          </p>
+          <div className="review-actions">
+            <button className="btn-paper btn-primary press" onClick={onTryAgain}>
+              Try same line
+            </button>
+            <button className="btn-paper press" onClick={onNextLine}>
+              Next line
+            </button>
+            {userAudioUrl && (
+              <button className="btn-paper press" onClick={() => onPlayUser()}>
+                Play your take
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      </article>
 
+      <details className="analysis-fold">
+        <summary>
+          <span>Open acoustic notes</span>
+          <small>scores, phonemes, pitch</small>
+        </summary>
+        <div className="analysis-grid">
+          <aside>
+            <ScoreBars scores={result.scores} overall={result.overall} />
+            <SessionData result={result} accent={accent} />
+          </aside>
+          <div className="analysis-main">
+            <PhonemeTimeline phonemes={result.phonemes} />
+            <PhonemeABDiff
+              phonemes={result.phonemes}
+              onPlayNative={onPlayTarget}
+              onPlayUser={onPlayUser}
+              hasUserAudio={!!userAudioUrl}
+            />
+            {result.pitch_contour && (
+              <PitchContourOverlay
+                contour={result.pitch_contour}
+                onPlayNative={onPlayTarget}
+                onPlayUser={onPlayUser}
+                hasUserAudio={!!userAudioUrl}
+              />
+            )}
+          </div>
+        </div>
+      </details>
+
+      <details className="analysis-fold">
+        <summary>
+          <span>Voice experiment</span>
+          <small>optional rendering</small>
+        </summary>
+        <div className="voice-context">
+          {voiceProfile && (
+            <button
+              className="btn-paper press"
+              onClick={onHearInVoice}
+              disabled={hearInVoiceState !== "idle"}
+            >
+              {hearInVoiceState === "loading"
+                ? "Rendering voice"
+                : hearInVoiceState === "playing"
+                ? "Playing voice"
+                : `Hear your voice in ${accent}`}
+            </button>
+          )}
+          {hearInVoiceWords.length > 0 && hearInVoiceState !== "idle" && (
+            <div className="quiet-panel" style={{ padding: 16 }}>
+              <SpokenText words={hearInVoiceWords} audio={hearInVoiceRef} playing={hearInVoiceState === "playing"} />
+            </div>
+          )}
+          <AccentConvertCard
+            userAudio={userAudioBlob}
+            accent={accent}
+            voiceProfile={voiceProfile}
+            onOpenEnrollment={onOpenEnrollment}
+          />
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function SessionData({ result, accent }: { result: AssessmentResult; accent: Accent }) {
+  const wer = typeof result.wer === "number" ? `${Math.round(result.wer * 100)}%` : "not reported";
+  const elapsed = result.debug?.elapsed_ms ? `${result.debug.elapsed_ms}ms` : isMockMode() ? "demo" : "live";
+  return (
+    <dl className="session-data">
       <div>
-        <p
-          className="font-display"
-          style={{ fontSize: 28, fontWeight: 700, color: "var(--ink)", lineHeight: 1.1 }}
-        >
-          {verdict}
-        </p>
+        <dt>Target</dt>
+        <dd>{ACCENT_LABELS[accent]}</dd>
       </div>
-    </div>
+      <div>
+        <dt>Phonemes</dt>
+        <dd>{result.phonemes.length}</dd>
+      </div>
+      <div>
+        <dt>WER</dt>
+        <dd>{wer}</dd>
+      </div>
+      <div>
+        <dt>Latency</dt>
+        <dd>{elapsed}</dd>
+      </div>
+      {result.transcript?.text && (
+        <div>
+          <dt>Transcript</dt>
+          <dd>{result.transcript.text}</dd>
+        </div>
+      )}
+    </dl>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="2" width="6" height="11" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <path d="M12 19v3" />
+      <path d="M8 22h8" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <rect x="5" y="5" width="14" height="14" rx="3" />
+    </svg>
+  );
+}
+
+function Spinner() {
+  return (
+    <span
+      className="spin"
+      aria-hidden
+      style={{
+        width: 16,
+        height: 16,
+        borderRadius: "50%",
+        border: "2px solid currentColor",
+        borderTopColor: "transparent",
+      }}
+    />
   );
 }

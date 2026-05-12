@@ -282,13 +282,13 @@ export default function PitchContourOverlay({
             />
           ))}
 
-          {/* Area fills (under curves) — fade in with the draw */}
+          {/* Area fills fade in with the draw. */}
           <g opacity={drawProgress}>
             <path d={nativeArea} fill={`url(#${gradId}-jade)`} />
             <path d={userArea} fill={`url(#${gradId}-rose)`} />
           </g>
 
-          {/* Native — calm jade, draws in */}
+          {/* Native contour draws in first. */}
           <path
             d={nativePath}
             fill="none"
@@ -301,7 +301,7 @@ export default function PitchContourOverlay({
             strokeDashoffset={nativeLen * (1 - drawProgress)}
           />
 
-          {/* User — warm rose, draws in slightly behind */}
+          {/* User contour draws in slightly behind. */}
           <path
             d={userPath}
             fill="none"
@@ -345,7 +345,7 @@ export default function PitchContourOverlay({
             </g>
           )}
 
-          {/* Playhead — line + glowing dot at the active curve */}
+          {/* Playhead line and dot at the active curve. */}
           {playing !== "none" && (() => {
             const idx = Math.round(playhead * (contour.native.length - 1));
             const series = playing === "native" ? contour.native : contour.user;
@@ -377,7 +377,7 @@ export default function PitchContourOverlay({
           })()}
         </svg>
 
-        {/* Hover tooltip — absolute over the SVG */}
+        {/* Hover tooltip positioned over the SVG. */}
         {hoverIdx != null && playing === "none" && (
           <div
             style={{
@@ -396,11 +396,11 @@ export default function PitchContourOverlay({
           >
             {hoverTimeMs}ms ·{" "}
             <span style={{ color: "var(--jade)" }}>
-              {hoverNative == null ? "—" : hoverNative.toFixed(2)}σ
+              {hoverNative == null ? "n/a" : hoverNative.toFixed(2)}σ
             </span>{" "}
             ·{" "}
             <span style={{ color: "var(--rose)" }}>
-              {hoverUser == null ? "—" : hoverUser.toFixed(2)}σ
+              {hoverUser == null ? "n/a" : hoverUser.toFixed(2)}σ
             </span>
           </div>
         )}
@@ -474,15 +474,18 @@ function ContourPlayBtn({
       }}
     >
       <span
+        aria-hidden
         style={{
-          fontSize: 9,
-          marginRight: 4,
+          width: 0,
+          height: 0,
+          borderLeft: `6px solid ${active ? color : "var(--ink-4)"}`,
+          borderTop: "4px solid transparent",
+          borderBottom: "4px solid transparent",
+          marginRight: 6,
           display: "inline-block",
           animation: active ? "contour-pulse 1.4s ease-in-out infinite" : undefined,
         }}
-      >
-        ▶
-      </span>
+      />
       {label}
       <style jsx>{`
         @keyframes contour-pulse {

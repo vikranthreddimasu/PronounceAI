@@ -66,31 +66,15 @@ export default function SettingsPage() {
   };
 
   return (
-    <main className="mx-auto" style={{ maxWidth: 760, padding: "32px 20px 80px" }}>
-      <header style={{ marginBottom: 28 }}>
-        <p
-          className="font-mono"
-          style={{
-            fontSize: 11,
-            letterSpacing: "0.14em",
-            textTransform: "uppercase",
-            color: "var(--ink-4)",
-            marginBottom: 6,
-          }}
-        >
-          Settings
-        </p>
-        <h1
-          className="font-display"
-          style={{
-            fontSize: 36,
-            fontWeight: 700,
-            color: "var(--ink)",
-            letterSpacing: "-0.02em",
-          }}
-        >
-          Tune the app to you.
-        </h1>
+    <main className="experience-page narrow-page">
+      <header className="page-hero" style={{ gridTemplateColumns: "1fr" }}>
+        <div>
+          <p className="eyebrow">Settings</p>
+          <h1 className="page-title">Make the lab feel like yours.</h1>
+          <p className="page-copy">
+            Target accent, L1 context, voice enrollment, theme, and local storage all stay explicit and easy to reverse.
+          </p>
+        </div>
       </header>
 
       {/* Target accent */}
@@ -130,7 +114,7 @@ export default function SettingsPage() {
               <div style={{ flex: 1 }}>
                 <p
                   className="font-display"
-                  style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", letterSpacing: "-0.01em" }}
+                  style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", letterSpacing: 0 }}
                 >
                   {a.label}
                 </p>
@@ -159,7 +143,7 @@ export default function SettingsPage() {
             appearance: "none",
           }}
         >
-          <option value="">— select —</option>
+          <option value="">Select language</option>
           {L1_OPTIONS.map((l) => (
             <option key={l} value={l}>{l}</option>
           ))}
@@ -177,7 +161,7 @@ export default function SettingsPage() {
               <div>
                 <p
                   className="font-display"
-                  style={{ fontSize: 22, fontWeight: 700, color: "var(--ink)", letterSpacing: "-0.015em", lineHeight: 1 }}
+                  style={{ fontSize: 22, fontWeight: 700, color: "var(--ink)", letterSpacing: 0, lineHeight: 1 }}
                 >
                   {voiceProfile.bundle_duration_s.toFixed(1)}
                   <span style={{ fontSize: 13, color: "var(--ink-4)", marginLeft: 4, fontWeight: 500 }}>s ref</span>
@@ -239,19 +223,19 @@ export default function SettingsPage() {
                       }
                     }}
                     title="Delete take"
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 6,
-                      background: "transparent",
-                      border: "none",
-                      color: "var(--ink-4)",
-                      fontSize: 14,
-                      cursor: "pointer",
-                      lineHeight: 1,
-                    }}
+	                    style={{
+	                      minWidth: 58,
+	                      height: 22,
+	                      borderRadius: 6,
+	                      background: "transparent",
+	                      border: "none",
+	                      color: "var(--ink-4)",
+	                      fontSize: 11,
+	                      cursor: "pointer",
+	                      lineHeight: 1,
+	                    }}
                   >
-                    ×
+	                    Remove
                   </button>
                 </div>
               ))}
@@ -270,7 +254,7 @@ export default function SettingsPage() {
                 }}
                 style={{ fontSize: 12 }}
               >
-                + Add take
+	                Add take
               </button>
               <button
                 className="btn-paper press"
@@ -300,7 +284,7 @@ export default function SettingsPage() {
               }}
               style={{ fontSize: 13 }}
             >
-              Set up voice profile →
+	              Set up voice profile
             </button>
           </div>
         )}
@@ -373,7 +357,7 @@ export default function SettingsPage() {
       </Group>
 
       {/* Danger zone */}
-      <Group title="Local data" hint="Everything lives in your browser. Nuke from orbit?">
+      <Group title="Local data" hint="Everything lives in your browser and can be cleared here.">
         {!confirmReset ? (
           <button
             className="btn-paper press"
@@ -472,7 +456,7 @@ function Group({ title, hint, children }: { title: string; hint?: string; childr
       <header style={{ marginBottom: 12 }}>
         <p
           className="font-display"
-          style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", letterSpacing: "-0.01em" }}
+          style={{ fontSize: 22, fontWeight: 660, color: "var(--ink)", letterSpacing: 0 }}
         >
           {title}
         </p>
@@ -480,7 +464,7 @@ function Group({ title, hint, children }: { title: string; hint?: string; childr
           <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 3, lineHeight: 1.5 }}>{hint}</p>
         )}
       </header>
-      <div className="card-paper-flat" style={{ padding: 18 }}>{children}</div>
+      <div className="surface" style={{ padding: 18 }}>{children}</div>
     </section>
   );
 }

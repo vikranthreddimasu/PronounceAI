@@ -32,6 +32,7 @@ export default function Tabs<T extends string>({ items, active, onChange, ariaLa
           key={it.id}
           role="tab"
           aria-selected={it.id === active}
+          aria-label={typeof it.count === "number" ? `${it.label}, ${it.count}` : it.label}
           data-active={it.id === active}
           className="tab-btn press"
           onClick={() => click(it.id)}
@@ -39,7 +40,7 @@ export default function Tabs<T extends string>({ items, active, onChange, ariaLa
         >
           {it.label}
           {typeof it.count === "number" && (
-            <span style={{ opacity: 0.55, marginLeft: 6, fontVariantNumeric: "tabular-nums" }}>
+            <span aria-hidden style={{ opacity: 0.55, marginLeft: 6, fontVariantNumeric: "tabular-nums" }}>
               {it.count}
             </span>
           )}

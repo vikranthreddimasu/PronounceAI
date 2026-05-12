@@ -139,7 +139,7 @@ export default function AccentConvertCard({
           >
             Accent conversion · {ACCENT_NAME[accent]}
           </div>
-          <div className="text-sm font-semibold" style={{ color: "var(--ink-1)", marginTop: 2 }}>
+          <div className="text-sm font-semibold" style={{ color: "var(--ink)", marginTop: 2 }}>
             {desc.title}
           </div>
         </div>
@@ -219,8 +219,8 @@ export default function AccentConvertCard({
           ? errorMsg
           : isConverting
           ? mode === "personal"
-            ? "Cloning your voice with the target accent…"
-            : "Mapping your speech into the target accent…"
+            ? "Cloning your voice with the target accent..."
+            : "Mapping your speech into the target accent..."
           : isReady
           ? "Compare it with your original above."
           : desc.sub}
@@ -237,7 +237,7 @@ export default function AccentConvertCard({
           onClick={() => setMode("native")}
         />
         <ModeBtn
-          label={voiceProfile ? "Your voice" : "Your voice ✦"}
+          label={voiceProfile ? "Your voice" : "Your voice"}
           active={mode === "personal"}
           onClick={() => {
             if (voiceProfile) setMode("personal");
@@ -264,7 +264,7 @@ export default function AccentConvertCard({
             transition: "all 200ms var(--ease-out)",
           }}
         >
-          ✦ Set up your voice (~10s) to hear yourself in this accent
+          Set up your voice to hear this accent in your own timbre
         </button>
       )}
     </div>

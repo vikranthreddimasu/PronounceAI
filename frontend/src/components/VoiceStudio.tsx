@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Accent } from "@/lib/types";
 import {
   fetchVoiceProfile,
@@ -46,7 +46,7 @@ function writeHistory(entries: HistoryEntry[]): void {
 }
 
 type Props = {
-  /** Initial text — used when arriving from /practice with a phrase loaded. */
+  /** Initial text used when arriving from /practice with a phrase loaded. */
   initialText?: string;
   /** Compact = embedded inside another card (no outer card frame). */
   compact?: boolean;
@@ -190,7 +190,7 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
               fontSize: 22,
               fontWeight: 700,
               color: "var(--ink)",
-              letterSpacing: "-0.015em",
+              letterSpacing: 0,
               marginBottom: 10,
               lineHeight: 1.2,
             }}
@@ -198,7 +198,7 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
             Lend your voice once, use it forever.
           </h3>
           <p style={{ fontSize: 13, color: "var(--ink-3)", lineHeight: 1.55, marginBottom: 18, maxWidth: 460 }}>
-            Read one sentence (~10s). After that, any text you type can be spoken in your voice in any target accent — no need to record again.
+            Read one sentence (~10s). After that, any text you type can be spoken in your voice in any target accent. No need to record again.
           </p>
           <button
             className="btn-paper btn-primary press"
@@ -208,7 +208,7 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
             }}
             style={{ fontSize: 13 }}
           >
-            Set up voice profile →
+            Set up voice profile
           </button>
         </div>
         <EnrollmentModal
@@ -239,7 +239,7 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
           </p>
           <p
             className="font-display"
-            style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", letterSpacing: "-0.01em", marginTop: 2 }}
+            style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", letterSpacing: 0, marginTop: 2 }}
           >
             Your voice, any accent, any text.
           </p>
@@ -266,7 +266,7 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
           setText(e.target.value.slice(0, MAX_LEN));
           if (state === "ready") setState("idle");
         }}
-        placeholder="Type anything you want to hear in your voice…"
+        placeholder="Type anything you want to hear in your voice..."
         rows={3}
         className="font-display"
         style={{
@@ -278,7 +278,7 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
           color: "var(--ink)",
           fontSize: 17,
           fontWeight: 500,
-          letterSpacing: "-0.005em",
+          letterSpacing: 0,
           lineHeight: 1.4,
           outline: "none",
           resize: "vertical",
@@ -331,7 +331,7 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
               onClick={isPlaying ? onStop : onReplay}
               style={{ fontSize: 13, flex: 1 }}
             >
-              <span aria-hidden style={{ fontSize: 11 }}>{isPlaying ? "■" : "▶"}</span>
+              <PlayStateIcon active={isPlaying} />
               {isPlaying ? "Stop" : "Play"}
             </button>
             <button
@@ -364,11 +364,11 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
                     display: "inline-block",
                   }}
                 />
-                Synthesising…
+                Synthesising...
               </>
             ) : (
               <>
-                <span aria-hidden style={{ fontSize: 11 }}>♪</span>
+                <WaveIcon />
                 Speak it
               </>
             )}
@@ -454,5 +454,43 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
         </div>
       )}
     </Outer>
+  );
+}
+
+function PlayStateIcon({ active }: { active: boolean }) {
+  if (active) {
+    return (
+      <span
+        aria-hidden
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: 2,
+          background: "currentColor",
+          display: "inline-block",
+        }}
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 0,
+        height: 0,
+        borderLeft: "8px solid currentColor",
+        borderTop: "5px solid transparent",
+        borderBottom: "5px solid transparent",
+        display: "inline-block",
+      }}
+    />
+  );
+}
+
+function WaveIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
+      <path d="M2 9c1.2 0 1.2-5 2.4-5s1.2 8 2.4 8S8 6 9.2 6s1.2 4 2.4 4S12.8 7 14 7" />
+    </svg>
   );
 }
