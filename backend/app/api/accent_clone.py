@@ -20,11 +20,14 @@ import numpy as np
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from app.api.voice_enroll import _ascii_safe_header
 from app.utils.audio import AudioError, preprocess
 from app.utils.voice_store import VoiceStoreError, get_enrollment
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_MAX_TEXT_CHARS = 400
 
 
 @router.post("/accent-clone")
@@ -34,6 +37,7 @@ async def accent_clone(
     accent: str = Form("GA"),
     user_id: str = Form(...),
     override_text: str = Form(""),
+    emotion: str = Form("neutral"),
 ):
     accent = accent.upper()
 
@@ -48,6 +52,12 @@ async def accent_clone(
         raise HTTPException(
             status_code=400,
             detail=f"Accent '{accent}' not supported. Choose: {voice_clone.supported_accents()}",
+        )
+    emotion_input = (emotion or "neutral").lower()
+    if emotion_input != "auto" and emotion_input not in voice_clone.supported_emotions():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Emotion '{emotion}' not supported. Choose: {voice_clone.supported_emotions()} or 'auto'",
         )
 
     try:
@@ -85,6 +95,22 @@ async def accent_clone(
             status_code=422,
             detail="Could not detect any words in the recording.",
         )
+    if len(target_text) > _MAX_TEXT_CHARS:
+        target_text = target_text[:_MAX_TEXT_CHARS]
+
+    resolved_emotion = emotion_input
+    detected_label = ""
+    detected_score = 0.0
+    if emotion_input == "auto":
+        detector = getattr(request.app.state, "emotion_detector", None)
+        if detector is None:
+            resolved_emotion = "neutral"
+        else:
+            resolved_emotion, detected_score, detected_label = detector.detect(target_text)
+            logger.info(
+                f"accent-clone auto-emotion: raw={detected_label} "
+                f"score={detected_score:.2f} → {resolved_emotion}"
+            )
 
     t0 = time.perf_counter()
     try:
@@ -94,6 +120,7 @@ async def accent_clone(
             accent=accent,
             ref_text=info.get("ref_text", ""),
             strategy="target_accent",
+            emotion=resolved_emotion,
         )
     except Exception as e:
         logger.exception(f"CosyVoice synthesis failed: {e}")
@@ -109,14 +136,26 @@ async def accent_clone(
         _json.dumps(result.words, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
 
+    headers = {
+        "X-Target-Text": _ascii_safe_header(target_text),
+        "X-Voice-Strategy": result.strategy,
+        "X-Voice-Mode": result.mode,
+        "X-Voice-Emotion": resolved_emotion,
+        "X-Word-Timings": words_b64,
+        "Access-Control-Expose-Headers": (
+            "X-Target-Text, X-Voice-Strategy, X-Voice-Mode, "
+            "X-Voice-Emotion, X-Voice-Emotion-Source, "
+            "X-Voice-Emotion-Raw, X-Voice-Emotion-Score, X-Word-Timings"
+        ),
+    }
+    if emotion_input == "auto":
+        headers["X-Voice-Emotion-Source"] = "auto"
+        headers["X-Voice-Emotion-Raw"] = detected_label or "neutral"
+        headers["X-Voice-Emotion-Score"] = f"{detected_score:.3f}"
+    else:
+        headers["X-Voice-Emotion-Source"] = "manual"
     return FileResponse(
         path=str(result.path),
         media_type="audio/wav",
-        headers={
-            "X-Target-Text": target_text[:200],
-            "X-Voice-Strategy": result.strategy,
-            "X-Voice-Mode": result.mode,
-            "X-Word-Timings": words_b64,
-            "Access-Control-Expose-Headers": "X-Target-Text, X-Voice-Strategy, X-Voice-Mode, X-Word-Timings",
-        },
+        headers=headers,
     )

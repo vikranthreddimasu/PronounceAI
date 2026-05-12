@@ -12,10 +12,24 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# `.env.local` wins for overlapping keys; `.env.example` only supplies defaults for a fresh checkout.
 load_dotenv(".env.local", override=True)
-load_dotenv(".env.example")
+load_dotenv(".env.example", override=False)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info").upper()
+
+
+def _cors_allow_list() -> tuple[list[str], bool]:
+    """Return (origins, allow_credentials). CORS_ORIGINS=comma-separated origins, or * for any (credentials off)."""
+    raw = os.getenv("CORS_ORIGINS", "").strip()
+    if raw == "*":
+        return ["*"], False
+    if raw:
+        origins = [o.strip() for o in raw.split(",") if o.strip()]
+        if origins:
+            return origins, True
+    return ["http://localhost:3000", "http://localhost:3001"], True
+
 
 # Set espeak-ng library path for phonemizer (Homebrew on macOS puts it here)
 _ESPEAK_LIB = os.getenv("ESPEAK_NG_LIB", "/opt/homebrew/lib/libespeak-ng.dylib")
@@ -139,6 +153,14 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Voice clone engine unavailable: {e}")
         app.state.voice_clone = None
 
+    try:
+        from app.models.emotion_detector import EmotionDetector
+        app.state.emotion_detector = EmotionDetector()
+        logger.info("Emotion detector ready (lazy-loaded)")
+    except Exception as e:
+        logger.warning(f"Emotion detector unavailable: {e}")
+        app.state.emotion_detector = None
+
     logger.info("All models loaded — server ready")
     app.state.startup_prewarm_task = None
     if PREWARM_MODELS:
@@ -152,11 +174,15 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down")
 
 
+_cors_origins, _cors_credentials = _cors_allow_list()
+logger.info("CORS allow_origins=%r allow_credentials=%s", _cors_origins, _cors_credentials)
+
 app = FastAPI(title="PronounceAI Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "http://localhost:3000"],
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

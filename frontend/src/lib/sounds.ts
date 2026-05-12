@@ -8,14 +8,16 @@
  *   confirm()    — two-note rise. Score reveal / save.
  *   release()    — exhale, ~120ms. Stop recording / dismiss.
  *
- * All sounds are short, low-volume, low-frequency. Anything punchy or
- * synth-y is wrong here — the goal is "satisfied click of a fountain pen",
- * not "video game blip".
+ * Short, low-frequency cues — still “paper / studio” not arcade, but loud
+ * enough to read on laptop speakers after `AudioContext` resume.
  *
  * User can mute via `setSoundsEnabled(false)`. Default = on.
  */
 
 const KEY = "pronounceai.sounds.v1";
+
+/** Linear gain multiplier on all peaks (was easy to miss on built‑in speakers). */
+const LOUDNESS = 2.05;
 
 let ctx: AudioContext | null = null;
 
@@ -62,21 +64,24 @@ export function tap(): void {
   if (!isSoundsEnabled()) return;
   const c = getCtx();
   if (!c) return;
-  if (c.state === "suspended") c.resume().catch(() => {});
-  // Mix of a low thud + a tiny click for "weight + crispness"
-  const thud = c.createOscillator();
-  const thudGain = c.createGain();
-  thud.frequency.value = 180;
-  thud.type = "sine";
-  thud.connect(thudGain).connect(c.destination);
-  envelope(c, thud, thudGain, 0.05, 4, 60);
+  const play = () => {
+    // Mix of a low thud + a tiny click for "weight + crispness"
+    const thud = c.createOscillator();
+    const thudGain = c.createGain();
+    thud.frequency.value = 180;
+    thud.type = "sine";
+    thud.connect(thudGain).connect(c.destination);
+    envelope(c, thud, thudGain, 0.072 * LOUDNESS, 3, 52);
 
-  const click = c.createOscillator();
-  const clickGain = c.createGain();
-  click.frequency.value = 1500;
-  click.type = "triangle";
-  click.connect(clickGain).connect(c.destination);
-  envelope(c, click, clickGain, 0.012, 1, 28);
+    const click = c.createOscillator();
+    const clickGain = c.createGain();
+    click.frequency.value = 1650;
+    click.type = "triangle";
+    click.connect(clickGain).connect(c.destination);
+    envelope(c, click, clickGain, 0.022 * LOUDNESS, 0.8, 22);
+  };
+  if (c.state === "suspended") void c.resume().then(play).catch(() => {});
+  else play();
 }
 
 /** Two-note rise — for score reveal / save success. */
@@ -84,21 +89,24 @@ export function confirm(): void {
   if (!isSoundsEnabled()) return;
   const c = getCtx();
   if (!c) return;
-  if (c.state === "suspended") c.resume().catch(() => {});
-  const notes = [440, 660];
-  notes.forEach((f, i) => {
-    const o = c.createOscillator();
-    const g = c.createGain();
-    o.type = "sine";
-    o.frequency.value = f;
-    o.connect(g).connect(c.destination);
-    const t0 = c.currentTime + i * 0.08;
-    g.gain.setValueAtTime(0, t0);
-    g.gain.linearRampToValueAtTime(0.035, t0 + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.32);
-    o.start(t0);
-    o.stop(t0 + 0.36);
-  });
+  const play = () => {
+    const notes = [440, 660];
+    notes.forEach((f, i) => {
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.type = "sine";
+      o.frequency.value = f;
+      o.connect(g).connect(c.destination);
+      const t0 = c.currentTime + i * 0.08;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.055 * LOUDNESS, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+      o.start(t0);
+      o.stop(t0 + 0.36);
+    });
+  };
+  if (c.state === "suspended") void c.resume().then(play).catch(() => {});
+  else play();
 }
 
 /** Exhale — for stop / cancel / close. */
@@ -106,23 +114,26 @@ export function release(): void {
   if (!isSoundsEnabled()) return;
   const c = getCtx();
   if (!c) return;
-  if (c.state === "suspended") c.resume().catch(() => {});
-  const noise = c.createBufferSource();
-  const buf = c.createBuffer(1, c.sampleRate * 0.12, c.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    const t = i / data.length;
-    data[i] = (Math.random() * 2 - 1) * (1 - t) * 0.5;
-  }
-  noise.buffer = buf;
-  const g = c.createGain();
-  const filter = c.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.value = 900;
-  noise.connect(filter).connect(g).connect(c.destination);
-  const t0 = c.currentTime;
-  g.gain.setValueAtTime(0.05, t0);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
-  noise.start(t0);
-  noise.stop(t0 + 0.14);
+  const play = () => {
+    const noise = c.createBufferSource();
+    const buf = c.createBuffer(1, c.sampleRate * 0.12, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / data.length;
+      data[i] = (Math.random() * 2 - 1) * (1 - t) * 0.5;
+    }
+    noise.buffer = buf;
+    const g = c.createGain();
+    const filter = c.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 1100;
+    noise.connect(filter).connect(g).connect(c.destination);
+    const t0 = c.currentTime;
+    g.gain.setValueAtTime(0.078 * LOUDNESS, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
+    noise.start(t0);
+    noise.stop(t0 + 0.14);
+  };
+  if (c.state === "suspended") void c.resume().then(play).catch(() => {});
+  else play();
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Accent } from "@/lib/types";
 import { convertAccent } from "@/lib/api";
 import { cloneAccent, speakInVoice, type VoiceProfile } from "@/lib/voiceProfile";
+import { isAbortError } from "@/lib/abortError";
 
 type Mode = "native" | "personal";
 
@@ -47,31 +48,49 @@ export default function AccentConvertCard({
   const [convertedUrl, setConvertedUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mountedRef = useRef(true);
+  const convertAbortRef = useRef<AbortController | null>(null);
+  const convertedUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      convertAbortRef.current?.abort();
+      convertAbortRef.current = null;
+      if (convertedUrlRef.current) URL.revokeObjectURL(convertedUrlRef.current);
+    };
+  }, []);
 
   // Reset whenever inputs change.
   useEffect(() => {
+    convertAbortRef.current?.abort();
+    convertAbortRef.current = null;
     setState("idle");
     setErrorMsg(null);
     if (convertedUrl) {
       URL.revokeObjectURL(convertedUrl);
+      convertedUrlRef.current = null;
       setConvertedUrl(null);
     }
     setIsPlaying(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userAudio, accent, mode]);
 
+  useEffect(() => {
+    convertedUrlRef.current = convertedUrl;
+  }, [convertedUrl]);
+
   // If profile appears/disappears, sync mode reasonably.
   useEffect(() => {
     if (!voiceProfile && mode === "personal") setMode("native");
   }, [voiceProfile, mode]);
 
-  useEffect(() => () => {
-    if (convertedUrl) URL.revokeObjectURL(convertedUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleConvert = useCallback(async () => {
     if (!userAudio || state === "converting") return;
+    convertAbortRef.current?.abort();
+    const ac = new AbortController();
+    convertAbortRef.current = ac;
     setState("converting");
     setErrorMsg(null);
     try {
@@ -79,20 +98,28 @@ export default function AccentConvertCard({
       if (mode === "personal") {
         if (!voiceProfile) throw new Error("Set up your voice first.");
         if (overrideText?.trim()) {
-          blob = (await speakInVoice(
-            voiceProfile.user_id,
-            overrideText,
-            accent,
-            voiceProfile.revision,
-            "target_accent"
-          )).audio;
+          blob = (
+            await speakInVoice(
+              voiceProfile.user_id,
+              overrideText,
+              accent,
+              voiceProfile.revision,
+              "target_accent",
+              ac.signal
+            )
+          ).audio;
         } else {
-          blob = await cloneAccent(userAudio, accent, voiceProfile.user_id);
+          blob = await cloneAccent(userAudio, accent, voiceProfile.user_id, { signal: ac.signal });
         }
       } else {
-        blob = await convertAccent(userAudio, accent);
+        blob = await convertAccent(userAudio, accent, { signal: ac.signal });
       }
+      if (!mountedRef.current || ac.signal.aborted) return;
       const url = URL.createObjectURL(blob);
+      if (convertedUrlRef.current && convertedUrlRef.current !== url) {
+        URL.revokeObjectURL(convertedUrlRef.current);
+      }
+      convertedUrlRef.current = url;
       setConvertedUrl(url);
       setState("ready");
       if (!audioRef.current) audioRef.current = new Audio();
@@ -102,8 +129,14 @@ export default function AccentConvertCard({
       setIsPlaying(true);
       audioRef.current.play().catch(() => setIsPlaying(false));
     } catch (e) {
+      if (!mountedRef.current || isAbortError(e)) {
+        if (mountedRef.current) setState("idle");
+        return;
+      }
       setErrorMsg((e as Error).message ?? "Could not convert");
       setState("error");
+    } finally {
+      if (convertAbortRef.current === ac) convertAbortRef.current = null;
     }
   }, [userAudio, accent, mode, voiceProfile, overrideText, state]);
 
@@ -249,7 +282,7 @@ export default function AccentConvertCard({
           onClick={() => setMode("native")}
         />
         <ModeBtn
-          label={voiceProfile ? "Your voice" : "Your voice"}
+          label={voiceProfile ? "Your voice" : "Set up voice"}
           active={mode === "personal"}
           onClick={() => {
             if (voiceProfile) setMode("personal");

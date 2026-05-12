@@ -1,5 +1,7 @@
 "use client";
 
+import { isAbortError } from "./abortError";
+
 /**
  * Voice profile = multi-take enrollment store, persisted server-side as
  * `data/enrollments/<userId>/take_NNN.wav` and bundled into a single 24kHz
@@ -20,6 +22,31 @@ const knownVoiceRevisions = new Map<string, string>();
 
 export type VoiceSessionStatus = "loading" | "none" | "ready" | "error";
 export type VoiceRenderMode = "target_accent" | "natural";
+export type VoiceEmotion =
+  | "neutral"
+  | "happy"
+  | "sad"
+  | "angry"
+  | "excited"
+  | "calm"
+  | "whisper";
+
+export type VoiceEmotionChoice = VoiceEmotion | "auto";
+
+export const VOICE_EMOTIONS: VoiceEmotion[] = [
+  "neutral",
+  "happy",
+  "sad",
+  "angry",
+  "excited",
+  "calm",
+  "whisper",
+];
+
+export const VOICE_EMOTION_CHOICES: VoiceEmotionChoice[] = [
+  "auto",
+  ...VOICE_EMOTIONS,
+];
 
 export type VoiceSessionState = {
   status: VoiceSessionStatus;
@@ -36,7 +63,19 @@ let voiceSessionState: VoiceSessionState = {
 };
 let refreshPromise: Promise<VoiceSessionState> | null = null;
 let refreshUserId: string | null = null;
+let refreshSessionCtrl: AbortController | null = null;
 const voiceListeners = new Set<(state: VoiceSessionState) => void>();
+
+function linkAbortParent(controller: AbortController, parent?: AbortSignal): () => void {
+  if (!parent) return () => {};
+  if (parent.aborted) {
+    controller.abort();
+    return () => {};
+  }
+  const onAbort = () => controller.abort();
+  parent.addEventListener("abort", onAbort, { once: true });
+  return () => parent.removeEventListener("abort", onAbort);
+}
 
 export function isCloneMockMode(): boolean {
   return FORCE_MOCK || !API_URL;
@@ -225,7 +264,7 @@ export function subscribeVoiceSession(cb: (state: VoiceSessionState) => void): (
 }
 
 export async function refreshVoiceSession(
-  opts: { force?: boolean } = {}
+  opts: { force?: boolean; signal?: AbortSignal } = {}
 ): Promise<VoiceSessionState> {
   if (typeof window === "undefined") return voiceSessionState;
   const userId = getOrCreateVoiceId();
@@ -233,19 +272,28 @@ export async function refreshVoiceSession(
   if (!opts.force && current.userId === userId && current.status !== "loading") {
     return current;
   }
-  if (refreshPromise && refreshUserId === userId) return refreshPromise;
+  if (!opts.force && refreshPromise && refreshUserId === userId) {
+    return refreshPromise;
+  }
+
+  refreshSessionCtrl?.abort();
+  const ctrl = new AbortController();
+  refreshSessionCtrl = ctrl;
+  const unlinkParent = linkAbortParent(ctrl, opts.signal);
 
   if (!current.profile) {
     emitVoiceSession({ status: "loading", userId, profile: null, error: null });
   }
 
   refreshUserId = userId;
-  const promise = fetchVoiceProfile(userId)
+
+  const promise = fetchVoiceProfile(userId, { signal: ctrl.signal })
     .then((profile) => {
       if (getCurrentVoiceId() !== userId) return getVoiceSessionSnapshot();
       return publishVoiceSession(profile, userId);
     })
     .catch((error) => {
+      if (isAbortError(error)) return getVoiceSessionSnapshot();
       if (getCurrentVoiceId() !== userId) return getVoiceSessionSnapshot();
       const message = (error as Error).message ?? "Could not check voice profile.";
       const latest = getVoiceSessionSnapshot();
@@ -255,6 +303,8 @@ export async function refreshVoiceSession(
       return publishVoiceSession(null, userId, message);
     })
     .finally(() => {
+      unlinkParent();
+      if (refreshSessionCtrl === ctrl) refreshSessionCtrl = null;
       if (refreshPromise === promise) {
         refreshPromise = null;
         refreshUserId = null;
@@ -265,9 +315,14 @@ export async function refreshVoiceSession(
   return promise;
 }
 
-export async function fetchVoiceProfile(userId: string): Promise<VoiceProfile | null> {
+export async function fetchVoiceProfile(
+  userId: string,
+  opts?: { signal?: AbortSignal }
+): Promise<VoiceProfile | null> {
   if (!userId || isCloneMockMode()) return null;
-  const res = await fetch(`${API_URL}/api/voice/${encodeURIComponent(userId)}`);
+  const res = await fetch(`${API_URL}/api/voice/${encodeURIComponent(userId)}`, {
+    signal: opts?.signal,
+  });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Fetch voice profile failed (${res.status})`);
   const profile = (await res.json()) as VoiceProfile;
@@ -279,7 +334,8 @@ export async function fetchVoiceProfile(userId: string): Promise<VoiceProfile | 
 export async function addVoiceTake(
   userId: string,
   audioBlob: Blob,
-  refText: string
+  refText: string,
+  opts?: { signal?: AbortSignal }
 ): Promise<VoiceProfile> {
   if (isCloneMockMode()) {
     throw new Error("Voice enrollment requires the live backend (mock mode is off).");
@@ -288,12 +344,16 @@ export async function addVoiceTake(
   form.append("audio", audioBlob, "take.webm");
   form.append("ref_text", refText);
   form.append("user_id", userId);
-  const res = await fetch(`${API_URL}/api/voice/enroll`, { method: "POST", body: form });
+  const res = await fetch(`${API_URL}/api/voice/enroll`, {
+    method: "POST",
+    body: form,
+    signal: opts?.signal,
+  });
   if (!res.ok) {
     const msg = await res.text().catch(() => res.statusText);
     throw new Error(msg || `Take upload failed (${res.status})`);
   }
-  const profile = await fetchVoiceProfile(userId);
+  const profile = await fetchVoiceProfile(userId, { signal: opts?.signal });
   if (!profile) throw new Error("Take saved but profile fetch failed.");
   publishVoiceSession(profile);
   return profile;
@@ -303,32 +363,39 @@ export async function addVoiceTake(
 export const enrollVoice = (userId: string, audio: Blob, refText: string) =>
   addVoiceTake(userId, audio, refText);
 
-export async function deleteVoiceTake(userId: string, takeId: string): Promise<VoiceProfile | null> {
+export async function deleteVoiceTake(
+  userId: string,
+  takeId: string,
+  opts?: { signal?: AbortSignal }
+): Promise<VoiceProfile | null> {
   if (!userId || isCloneMockMode()) return null;
   const res = await fetch(
     `${API_URL}/api/voice/${encodeURIComponent(userId)}/takes/${encodeURIComponent(takeId)}`,
-    { method: "DELETE" }
+    { method: "DELETE", signal: opts?.signal }
   );
   if (!res.ok) throw new Error(`Delete take failed (${res.status})`);
   invalidateVoiceCaches(userId);
-  const profile = await fetchVoiceProfile(userId);
+  const profile = await fetchVoiceProfile(userId, { signal: opts?.signal });
   publishVoiceSession(profile, userId);
   return profile;
 }
 
-export async function deleteVoiceProfile(userId: string): Promise<void> {
+export async function deleteVoiceProfile(userId: string, opts?: { signal?: AbortSignal }): Promise<void> {
   if (!userId || isCloneMockMode()) return;
-  const res = await fetch(`${API_URL}/api/voice/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  const res = await fetch(`${API_URL}/api/voice/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    signal: opts?.signal,
+  });
   if (!res.ok) throw new Error(`Delete voice profile failed (${res.status})`);
   invalidateVoiceCaches(userId);
   const nextId = getCurrentVoiceId() === userId ? rotateVoiceId() : getCurrentVoiceId() ?? "";
   publishVoiceSession(null, nextId);
 }
 
-export async function deleteCurrentVoiceProfile(): Promise<void> {
+export async function deleteCurrentVoiceProfile(opts?: { signal?: AbortSignal }): Promise<void> {
   const userId = getCurrentVoiceId();
   if (userId) {
-    await deleteVoiceProfile(userId);
+    await deleteVoiceProfile(userId, opts);
     return;
   }
   publishVoiceSession(null, rotateVoiceId());
@@ -346,6 +413,10 @@ export type SpokenClip = {
   accent: "GA" | "RP";
   text: string;
   renderMode: VoiceRenderMode;
+  emotion: VoiceEmotion;
+  emotionSource: "auto" | "manual";
+  detectedRawLabel?: string;
+  detectedScore?: number;
   synthesisMode?: string;
 };
 
@@ -364,10 +435,11 @@ function voiceClipKey(
   text: string,
   accent: "GA" | "RP",
   revision?: string,
-  renderMode: VoiceRenderMode = "target_accent"
+  renderMode: VoiceRenderMode = "target_accent",
+  emotion: VoiceEmotionChoice = "neutral"
 ): string {
   const rev = revision ?? knownVoiceRevisions.get(userId) ?? "no-revision";
-  return `${userId}:${rev}:${accent}:${renderMode}:${text.trim().slice(0, 400)}`;
+  return `${userId}:${rev}:${accent}:${renderMode}:${emotion}:${text.trim().slice(0, 400)}`;
 }
 
 function decodeWordTimings(header: string | null): WordTiming[] {
@@ -395,12 +467,14 @@ export async function speakInVoice(
   text: string,
   accent: "GA" | "RP",
   revision?: string,
-  renderMode: VoiceRenderMode = "target_accent"
+  renderMode: VoiceRenderMode = "target_accent",
+  signal?: AbortSignal,
+  emotion: VoiceEmotionChoice = "neutral"
 ): Promise<SpokenClip> {
   if (isCloneMockMode()) {
     throw new Error("Voice synthesis requires the live backend (mock mode is off).");
   }
-  return getVoiceClip(userId, text, accent, revision, renderMode);
+  return getVoiceClip(userId, text, accent, revision, renderMode, signal, emotion);
 }
 
 function getVoiceClip(
@@ -408,20 +482,19 @@ function getVoiceClip(
   text: string,
   accent: "GA" | "RP",
   revision?: string,
-  renderMode: VoiceRenderMode = "target_accent"
+  renderMode: VoiceRenderMode = "target_accent",
+  signal?: AbortSignal,
+  emotion: VoiceEmotionChoice = "neutral"
 ): Promise<SpokenClip> {
   const normalized = text.trim();
-  const key = voiceClipKey(userId, normalized, accent, revision, renderMode);
-  const cached = voiceClipCache.get(key);
-  if (cached) return cached;
+  const key = voiceClipKey(userId, normalized, accent, revision, renderMode, emotion);
 
-  const form = new FormData();
-  form.append("user_id", userId);
-  form.append("text", normalized);
-  form.append("accent", accent);
-  form.append("strategy", renderMode);
-  const promise = fetch(`${API_URL}/api/voice/speak`, { method: "POST", body: form })
-    .then(async (res) => {
+  const execute = (): Promise<SpokenClip> =>
+    fetch(`${API_URL}/api/voice/speak`, {
+      method: "POST",
+      body: buildSpeakForm(normalized, userId, accent, renderMode, emotion),
+      signal,
+    }).then(async (res) => {
       if (!res.ok) {
         const msg = await res.text().catch(() => res.statusText);
         throw new Error(`Voice synthesis failed: ${msg}`);
@@ -429,13 +502,54 @@ function getVoiceClip(
       const audio = await res.blob();
       const words = decodeWordTimings(res.headers.get("X-Word-Timings"));
       const synthesisMode = res.headers.get("X-Voice-Mode") ?? undefined;
-      return { audio, words, accent, text: normalized, renderMode, synthesisMode };
-    })
-    .catch((error) => {
-      voiceClipCache.delete(key);
-      throw error;
+      const resolvedEmotion = (res.headers.get("X-Voice-Emotion") ?? "neutral") as VoiceEmotion;
+      const emotionSource = (res.headers.get("X-Voice-Emotion-Source") ?? "manual") as "auto" | "manual";
+      const detectedRawLabel = res.headers.get("X-Voice-Emotion-Raw") ?? undefined;
+      const detectedScoreRaw = res.headers.get("X-Voice-Emotion-Score");
+      const detectedScore = detectedScoreRaw != null ? Number(detectedScoreRaw) : undefined;
+      return {
+        audio,
+        words,
+        accent,
+        text: normalized,
+        renderMode,
+        emotion: resolvedEmotion,
+        emotionSource,
+        detectedRawLabel,
+        detectedScore,
+        synthesisMode,
+      };
     });
+
+  /** Cancellable callers must not share LRU cache rows with aborted bodies. */
+  if (signal) {
+    return execute();
+  }
+
+  const cached = voiceClipCache.get(key);
+  if (cached) return cached;
+
+  const promise = execute().catch((error) => {
+    voiceClipCache.delete(key);
+    throw error;
+  });
   return rememberVoiceClip(key, promise);
+}
+
+function buildSpeakForm(
+  normalized: string,
+  userId: string,
+  accent: "GA" | "RP",
+  renderMode: VoiceRenderMode,
+  emotion: VoiceEmotionChoice = "neutral"
+): FormData {
+  const form = new FormData();
+  form.append("user_id", userId);
+  form.append("text", normalized);
+  form.append("accent", accent);
+  form.append("strategy", renderMode);
+  form.append("emotion", emotion);
+  return form;
 }
 
 export function precomposeVoice(
@@ -443,10 +557,11 @@ export function precomposeVoice(
   text: string,
   accent: "GA" | "RP",
   revision?: string,
-  renderMode: VoiceRenderMode = "target_accent"
+  renderMode: VoiceRenderMode = "target_accent",
+  emotion: VoiceEmotionChoice = "neutral"
 ): void {
   if (isCloneMockMode() || !userId || text.trim().length < 2) return;
-  getVoiceClip(userId, text, accent, revision, renderMode).catch(() => {
+  getVoiceClip(userId, text, accent, revision, renderMode, undefined, emotion).catch(() => {
     // Speculative work is best-effort. The explicit click path will show errors.
   });
 }
@@ -456,7 +571,7 @@ export async function cloneAccent(
   audioBlob: Blob,
   accent: "GA" | "RP",
   userId: string,
-  overrideText?: string
+  opts?: { overrideText?: string; signal?: AbortSignal; emotion?: VoiceEmotionChoice }
 ): Promise<Blob> {
   if (isCloneMockMode()) {
     throw new Error("Accent clone requires the live backend (mock mode is off).");
@@ -465,8 +580,14 @@ export async function cloneAccent(
   form.append("audio", audioBlob, "recording.webm");
   form.append("accent", accent);
   form.append("user_id", userId);
+  const overrideText = opts?.overrideText;
   if (overrideText) form.append("override_text", overrideText);
-  const res = await fetch(`${API_URL}/api/accent-clone`, { method: "POST", body: form });
+  if (opts?.emotion) form.append("emotion", opts.emotion);
+  const res = await fetch(`${API_URL}/api/accent-clone`, {
+    method: "POST",
+    body: form,
+    signal: opts?.signal,
+  });
   if (!res.ok) {
     const msg = await res.text().catch(() => res.statusText);
     throw new Error(`Accent clone failed: ${msg}`);

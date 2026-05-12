@@ -117,6 +117,14 @@ async def delete_voice_take(user_id: str, take_id: str):
 _MAX_TEXT_CHARS = 400
 
 
+def _ascii_safe_header(value: str, limit: int = 200) -> str:
+    """HTTP headers must be Latin-1. Strip non-ASCII so smart quotes, em-dashes,
+    emoji, and accented chars don't crash uvicorn when echoed back to the client.
+    """
+    snippet = value[:limit]
+    return snippet.encode("ascii", "ignore").decode("ascii")
+
+
 @router.post("/voice/speak")
 async def speak(
     request: Request,
@@ -124,6 +132,7 @@ async def speak(
     text: str = Form(...),
     accent: str = Form("GA"),
     strategy: str = Form("target_accent"),
+    emotion: str = Form("neutral"),
 ):
     accent = accent.upper()
     text = (text or "").strip()
@@ -143,6 +152,26 @@ async def speak(
             status_code=400,
             detail=f"Accent '{accent}' not supported. Choose: {voice_clone.supported_accents()}",
         )
+    emotion_input = (emotion or "neutral").lower()
+    detected_label = ""
+    detected_score = 0.0
+    if emotion_input == "auto":
+        detector = getattr(request.app.state, "emotion_detector", None)
+        if detector is None:
+            emotion = "neutral"
+        else:
+            emotion, detected_score, detected_label = detector.detect(text)
+            logger.info(
+                f"voice/speak auto-emotion: raw={detected_label} "
+                f"score={detected_score:.2f} → {emotion}"
+            )
+    elif emotion_input not in voice_clone.supported_emotions():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Emotion '{emotion}' not supported. Choose: {voice_clone.supported_emotions()} or 'auto'",
+        )
+    else:
+        emotion = emotion_input
 
     try:
         info = get_enrollment(user_id)
@@ -162,6 +191,7 @@ async def speak(
             accent=accent,
             ref_text=info.get("ref_text", ""),
             strategy=strategy,
+            emotion=emotion,
         )
     except Exception as e:
         logger.exception(f"Speak synthesis failed: {e}")
@@ -180,17 +210,27 @@ async def speak(
         json.dumps(result.words, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
 
+    headers = {
+        "X-Target-Text": _ascii_safe_header(text),
+        "X-Accent": accent,
+        "X-Voice-Strategy": result.strategy,
+        "X-Voice-Mode": result.mode,
+        "X-Voice-Emotion": emotion,
+        "X-Word-Timings": words_b64,
+        "Access-Control-Expose-Headers": (
+            "X-Target-Text, X-Accent, X-Voice-Strategy, X-Voice-Mode, "
+            "X-Voice-Emotion, X-Voice-Emotion-Source, "
+            "X-Voice-Emotion-Raw, X-Voice-Emotion-Score, X-Word-Timings"
+        ),
+    }
+    if emotion_input == "auto":
+        headers["X-Voice-Emotion-Source"] = "auto"
+        headers["X-Voice-Emotion-Raw"] = detected_label or "neutral"
+        headers["X-Voice-Emotion-Score"] = f"{detected_score:.3f}"
+    else:
+        headers["X-Voice-Emotion-Source"] = "manual"
     return FileResponse(
         path=str(result.path),
         media_type="audio/wav",
-        headers={
-            "X-Target-Text": text[:200],
-            "X-Accent": accent,
-            "X-Voice-Strategy": result.strategy,
-            "X-Voice-Mode": result.mode,
-            "X-Word-Timings": words_b64,
-            "Access-Control-Expose-Headers": (
-                "X-Target-Text, X-Accent, X-Voice-Strategy, X-Voice-Mode, X-Word-Timings"
-            ),
-        },
+        headers=headers,
     )

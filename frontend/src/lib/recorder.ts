@@ -91,12 +91,18 @@ export async function createRecorder(): Promise<Recorder> {
           reject(new Error("recorder not started"));
           return;
         }
+        if (recorder.state === "inactive") {
+          // Already stopped — return whatever chunks we have rather than hanging.
+          const type = mimeType ?? "audio/webm";
+          resolve(new Blob(chunks, { type }));
+          return;
+        }
         recorder.onstop = () => {
           active = false;
           const type = mimeType ?? "audio/webm";
           resolve(new Blob(chunks, { type }));
         };
-        recorder.onerror = (e) => reject(e);
+        recorder.onerror = (e) => reject(new Error((e as Event).type ?? "recorder error"));
         try {
           recorder.stop();
         } catch (e) {
@@ -146,20 +152,52 @@ export async function createRecorder(): Promise<Recorder> {
   };
 }
 
+export type SpeakReferenceOptions = {
+  signal?: AbortSignal;
+};
+
 /** Speak text with the browser's TTS as a mock-mode native reference. */
-export function speakReference(text: string): Promise<void> {
-  return new Promise((resolve) => {
+export function speakReference(text: string, opts?: SpeakReferenceOptions): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const signal = opts?.signal;
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
       resolve();
       return;
     }
+    let settled = false;
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "en-US";
     u.rate = 0.95;
     u.pitch = 1.0;
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
+
+    const detachAbort = () => signal?.removeEventListener("abort", onAbort);
+
+    const onAbort = () => {
+      detachAbort();
+      window.speechSynthesis.cancel();
+      if (settled) return;
+      settled = true;
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    u.onend = () => {
+      if (settled) return;
+      settled = true;
+      detachAbort();
+      resolve();
+    };
+    u.onerror = () => {
+      if (settled) return;
+      settled = true;
+      detachAbort();
+      resolve();
+    };
     window.speechSynthesis.speak(u);
   });
 }

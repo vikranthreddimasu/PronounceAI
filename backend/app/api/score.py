@@ -82,6 +82,41 @@ def _resample_f0(f0: np.ndarray, n_out: int) -> np.ndarray:
     return np.interp(src_idx, np.arange(len(f0)), f0).astype(np.float32)
 
 
+def _voiced_segment_bounds(f0: np.ndarray) -> tuple[int, int]:
+    """[start, end) slice covering first through last voiced frame (exclusive end)."""
+    voiced = np.where(f0 > 0)[0]
+    if voiced.size == 0:
+        return 0, len(f0)
+    return int(voiced[0]), int(voiced[-1]) + 1
+
+
+def _f0_segment_onset_aligned(f0: np.ndarray) -> np.ndarray:
+    """
+    Trim leading / trailing silence (Hz <= 0) so native + learner contours both
+    start at phonation onset — matches how users mentally compare productions.
+    Falls back to the full contour if there is too little voiced material.
+    """
+    f0 = np.asarray(f0, dtype=np.float64)
+    if f0.size == 0:
+        return f0.astype(np.float32)
+    i0, i1 = _voiced_segment_bounds(f0)
+    seg = f0[i0:i1]
+    # Need spans for interp; if trimming removes almost everything, keep full wav
+    if seg.size < 2:
+        return f0.astype(np.float32)
+    return seg.astype(np.float32)
+
+
+def _segment_wall_ms(full_len: int, seg_len: int, clip_ms: int) -> int:
+    """Approximate milliseconds spanned by *seg* inside a clip of length *clip_ms*."""
+    if full_len <= 1:
+        return max(int(clip_ms), 1)
+    return max(
+        1,
+        int(round(int(clip_ms) * max(int(seg_len) - 1, 1) / max(full_len - 1, 1))),
+    )
+
+
 def _zscore_voiced(arr: np.ndarray) -> np.ndarray:
     """Z-score using only voiced (>0) frames; unvoiced kept as 0 sentinel."""
     voiced = arr[arr > 0]
@@ -103,15 +138,37 @@ def _contour_to_json(arr: np.ndarray) -> list[float | None]:
 
 
 def _build_pitch_contour(
-    user_f0: np.ndarray, native_f0: np.ndarray, duration_ms: int
+    user_f0: np.ndarray,
+    native_f0: np.ndarray,
+    *,
+    user_duration_ms: int,
+    native_duration_ms: int,
 ) -> dict:
-    """Returns the frontend's PitchContour shape — z-scored, equal length, null-unvoiced."""
-    user_r = _resample_f0(user_f0, PITCH_CONTOUR_FRAMES)
-    native_r = _resample_f0(native_f0, PITCH_CONTOUR_FRAMES)
+    """
+    Frontend PitchContour — z-scored, equal length, null-unvoiced.
+
+    Both series are resampled after trimming leading/trailing unvoiced frames
+    (speech onset alignment) so the overlay compares pitch shape from when each
+    clip has voicing, not from wall-clock t=0 (which exaggerates offset when the
+    learner starts late).
+    """
+    user_full = np.asarray(user_f0, dtype=np.float32)
+    native_full = np.asarray(native_f0, dtype=np.float32)
+    user_seg = _f0_segment_onset_aligned(user_full)
+    native_seg = _f0_segment_onset_aligned(native_full)
+
+    user_r = _resample_f0(user_seg, PITCH_CONTOUR_FRAMES)
+    native_r = _resample_f0(native_seg, PITCH_CONTOUR_FRAMES)
+
+    visual_ms = max(
+        _segment_wall_ms(len(user_full), len(user_seg), user_duration_ms),
+        _segment_wall_ms(len(native_full), len(native_seg), native_duration_ms),
+    )
+
     return {
         "user": _contour_to_json(_zscore_voiced(user_r)),
         "native": _contour_to_json(_zscore_voiced(native_r)),
-        "duration_ms": int(duration_ms),
+        "duration_ms": int(visual_ms),
     }
 
 
@@ -524,7 +581,8 @@ async def score_recording(
     pitch_contour = _build_pitch_contour(
         user_f0_full,
         native_f0,
-        duration_ms=max(user_duration_ms, native_dur_ms),
+        user_duration_ms=user_duration_ms,
+        native_duration_ms=max(int(native_dur_ms), 1),
     )
 
     # Layer 4 — Accent distance

@@ -25,11 +25,13 @@ router = APIRouter()
 VOICE_MAP = {
     "GA":       ("a", "af_heart"),   # lang_code, voice
     "RP":       ("b", "bf_emma"),
-    "AuE":      ("a", "af_bella"),   # closest available
-    "Irish":    ("b", "bm_george"),
-    "Scottish": ("b", "bm_lewis"),
-    "IndianE":  ("a", "am_michael"),
+    "AUE":      ("a", "af_bella"),   # closest available
+    "IRISH":    ("b", "bm_george"),
+    "SCOTTISH": ("b", "bm_lewis"),
+    "INDIANE":  ("a", "am_michael"),
 }
+
+MAX_TTS_TEXT_CHARS = 400
 
 SAMPLE_RATE = 24000   # Kokoro native output rate
 _PIPELINE_LOCK = threading.RLock()
@@ -81,8 +83,16 @@ async def tts(
         accent = "GA"
     if not 0.5 <= speed <= 1.5:
         speed = 0.9
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Text is required.")
+    if len(text) > MAX_TTS_TEXT_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Text too long (max {MAX_TTS_TEXT_CHARS} chars).",
+        )
 
-    cache_key = (text[:200], accent, round(speed, 2))
+    cache_key = (text, accent, round(speed, 2))
     with _AUDIO_CACHE_LOCK:
         cached = _audio_cache.get(cache_key)
     if cached is not None:

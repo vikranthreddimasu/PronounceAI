@@ -3,18 +3,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Accent } from "@/lib/types";
 import {
+  VOICE_EMOTION_CHOICES,
   chooseEnrollmentPrompts,
   deleteVoiceProfile,
   precomposeVoice,
   refreshVoiceSession,
   speakInVoice,
   type EnrollmentPrompt,
+  type VoiceEmotion,
+  type VoiceEmotionChoice,
   type VoiceRenderMode,
   type WordTiming,
 } from "@/lib/voiceProfile";
 import { useVoiceSession } from "@/lib/useVoiceSession";
 import { getProfile, setProfile } from "@/lib/store";
 import { tap, confirm, release } from "@/lib/sounds";
+import { isAbortError } from "@/lib/abortError";
 import EnrollmentModal from "@/components/EnrollmentModal";
 import SpokenText from "@/components/SpokenText";
 
@@ -33,13 +37,33 @@ const RENDER_MODE_LABELS: Record<VoiceRenderMode, string> = {
   natural: "Sound like my recording",
 };
 
+const EMOTION_LABELS: Record<VoiceEmotion, string> = {
+  neutral: "Neutral",
+  happy: "Happy",
+  sad: "Sad",
+  angry: "Angry",
+  excited: "Excited",
+  calm: "Calm",
+  whisper: "Whisper",
+};
+
+const EMOTION_CHOICE_LABELS: Record<VoiceEmotionChoice, string> = {
+  auto: "Auto (detect from text)",
+  ...EMOTION_LABELS,
+};
+
 const MAX_LEN = 400;
 const MIN_LEN = 2;
 const HISTORY_KEY = "pronounceai.studio.history.v1";
 const MAX_HISTORY = 6;
 
 type ClipState = "idle" | "loading" | "ready" | "error";
-type HistoryEntry = { text: string; accent: Accent; renderMode?: VoiceRenderMode };
+type HistoryEntry = {
+  text: string;
+  accent: Accent;
+  renderMode?: VoiceRenderMode;
+  emotion?: VoiceEmotionChoice;
+};
 
 type Props = {
   initialText?: string;
@@ -67,6 +91,8 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
   const [text, setText] = useState(initialText);
   const [accent, setAccent] = useState<Accent>("GA");
   const [renderMode, setRenderMode] = useState<VoiceRenderMode>("target_accent");
+  const [emotion, setEmotion] = useState<VoiceEmotionChoice>("auto");
+  const [detectedEmotion, setDetectedEmotion] = useState<VoiceEmotion | null>(null);
   const [state, setState] = useState<ClipState>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -78,6 +104,9 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
   const [confirmReset, setConfirmReset] = useState(false);
   const [resetting, setResetting] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mountedRef = useRef(true);
+  const speakAbortRef = useRef<AbortController | null>(null);
+  const deleteAbortRef = useRef<AbortController | null>(null);
   const voiceSession = useVoiceSession();
   const profile = voiceSession.profile;
   const trimmedText = text.trim();
@@ -94,14 +123,28 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
   useEffect(() => {
     if (!profile || trimmedText.length < MIN_LEN) return;
     const timer = window.setTimeout(() => {
-      precomposeVoice(profile.user_id, trimmedText, accent, profile.revision, renderMode);
+      precomposeVoice(profile.user_id, trimmedText, accent, profile.revision, renderMode, emotion);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [accent, profile, renderMode, trimmedText]);
+  }, [accent, emotion, profile, renderMode, trimmedText]);
 
   useEffect(() => () => {
     if (audioUrl) URL.revokeObjectURL(audioUrl);
   }, [audioUrl]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      speakAbortRef.current?.abort();
+      speakAbortRef.current = null;
+      deleteAbortRef.current?.abort();
+      deleteAbortRef.current = null;
+      try {
+        audioRef.current?.pause();
+      } catch {}
+    };
+  }, []);
 
   const canRender = voiceSession.status === "ready" && profile !== null && trimmedText.length >= MIN_LEN;
   const voiceReady = voiceSession.status === "ready" && profile !== null;
@@ -112,6 +155,7 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
     setWords([]);
     setIsPlaying(false);
     setState("idle");
+    setDetectedEmotion(null);
   }, [audioUrl]);
 
   const openEnrollment = useCallback(() => {
@@ -124,13 +168,21 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
     if (!profile?.user_id || resetting) return;
     tap();
     setResetting(true);
+    deleteAbortRef.current?.abort();
+    const ac = new AbortController();
+    deleteAbortRef.current = ac;
     try {
       clearClip();
-      await deleteVoiceProfile(profile.user_id);
+      await deleteVoiceProfile(profile.user_id, { signal: ac.signal });
+      if (!mountedRef.current || ac.signal.aborted) return;
       setConfirmReset(false);
     } catch (err) {
+      if (!mountedRef.current || isAbortError(err)) {
+        return;
+      }
       setErrorMsg((err as Error).message ?? "Could not delete voice profile.");
     } finally {
+      if (deleteAbortRef.current === ac) deleteAbortRef.current = null;
       setResetting(false);
     }
   }, [clearClip, profile?.user_id, resetting]);
@@ -148,6 +200,12 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
     clearClip();
   }, [clearClip]);
 
+  const onEmotionChange = useCallback((next: VoiceEmotionChoice) => {
+    tap();
+    setEmotion(next);
+    clearClip();
+  }, [clearClip]);
+
   const onTextChange = useCallback((value: string) => {
     setText(value.slice(0, MAX_LEN));
     if (state !== "idle") clearClip();
@@ -162,12 +220,28 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
     tap();
     setState("loading");
     setErrorMsg(null);
+    speakAbortRef.current?.abort();
     try {
-      const clip = await speakInVoice(profile.user_id, trimmedText, accent, profile.revision, renderMode);
+      audioRef.current?.pause();
+    } catch {}
+    const ac = new AbortController();
+    speakAbortRef.current = ac;
+    try {
+      const clip = await speakInVoice(
+        profile.user_id,
+        trimmedText,
+        accent,
+        profile.revision,
+        renderMode,
+        ac.signal,
+        emotion
+      );
+      if (!mountedRef.current || ac.signal.aborted) return;
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       const url = URL.createObjectURL(clip.audio);
       setAudioUrl(url);
       setWords(clip.words);
+      setDetectedEmotion(clip.emotionSource === "auto" ? clip.emotion : null);
       setState("ready");
       confirm();
 
@@ -178,20 +252,32 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
       setIsPlaying(true);
       audioRef.current.play().catch(() => setIsPlaying(false));
 
-      const entry: HistoryEntry = { text: trimmedText, accent, renderMode };
+      const entry: HistoryEntry = { text: trimmedText, accent, renderMode, emotion };
       const next = [
         entry,
         ...history.filter(
-          (h) => !(h.text === entry.text && h.accent === entry.accent && (h.renderMode ?? "target_accent") === entry.renderMode)
+          (h) =>
+            !(
+              h.text === entry.text &&
+              h.accent === entry.accent &&
+              (h.renderMode ?? "target_accent") === entry.renderMode &&
+              (h.emotion ?? "neutral") === entry.emotion
+            )
         ),
       ].slice(0, MAX_HISTORY);
       setHistory(next);
       writeHistory(next);
     } catch (e) {
+      if (!mountedRef.current || isAbortError(e)) {
+        if (mountedRef.current) setState("idle");
+        return;
+      }
       setErrorMsg((e as Error).message ?? "Voice rendering failed.");
       setState("error");
+    } finally {
+      if (speakAbortRef.current === ac) speakAbortRef.current = null;
     }
-  }, [accent, audioUrl, history, openEnrollment, profile, renderMode, state, trimmedText]);
+  }, [accent, audioUrl, emotion, history, openEnrollment, profile, renderMode, state, trimmedText]);
 
   const onReplay = useCallback(() => {
     if (!audioUrl) return;
@@ -218,6 +304,7 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
     setText(h.text);
     setAccent(h.accent);
     setRenderMode(h.renderMode ?? "target_accent");
+    setEmotion(h.emotion ?? "auto");
     clearClip();
   }, [clearClip]);
 
@@ -326,6 +413,26 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
                 </button>
               ))}
             </div>
+            <label className="voice-lab-emotion-label" htmlFor="voice-lab-emotion">
+              Emotion
+            </label>
+            <select
+              id="voice-lab-emotion"
+              className="voice-lab-emotion-select press"
+              value={emotion}
+              onChange={(e) => onEmotionChange(e.target.value as VoiceEmotionChoice)}
+            >
+              {VOICE_EMOTION_CHOICES.map((e) => (
+                <option key={e} value={e}>
+                  {EMOTION_CHOICE_LABELS[e]}
+                </option>
+              ))}
+            </select>
+            {emotion === "auto" && detectedEmotion && (
+              <p className="voice-lab-emotion-detected" aria-live="polite">
+                Detected: <strong>{EMOTION_LABELS[detectedEmotion]}</strong>
+              </p>
+            )}
           </details>
         </div>
 
@@ -374,12 +481,17 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
             <div>
               {history.map((h, i) => (
                 <button
-                  key={`${h.text}-${h.accent}-${h.renderMode ?? "target_accent"}-${i}`}
+                  key={`${h.text}-${h.accent}-${h.renderMode ?? "target_accent"}-${h.emotion ?? "neutral"}-${i}`}
                   className="press"
                   onClick={() => onHistoryClick(h)}
                   type="button"
                 >
-                  <span>{ACCENT_LABELS[h.accent]}</span>
+                  <span>
+                    {ACCENT_LABELS[h.accent]}
+                    {h.emotion && h.emotion !== "neutral"
+                      ? ` · ${EMOTION_CHOICE_LABELS[h.emotion]}`
+                      : ""}
+                  </span>
                   <strong>{h.text}</strong>
                 </button>
               ))}

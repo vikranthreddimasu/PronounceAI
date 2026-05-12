@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   getProfile,
   setProfile,
@@ -10,6 +10,7 @@ import {
   type Theme,
 } from "@/lib/store";
 import { isSoundsEnabled, setSoundsEnabled, tap, confirm } from "@/lib/sounds";
+import { isAbortError } from "@/lib/abortError";
 import {
   deleteCurrentVoiceProfile,
   deleteVoiceProfile,
@@ -42,6 +43,19 @@ export default function SettingsPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const voiceSession = useVoiceSession();
   const voiceProfile = voiceSession.profile;
+
+  const voiceMutateAbortRef = useRef<AbortController | null>(null);
+
+  const beginVoiceMutation = useCallback(() => {
+    voiceMutateAbortRef.current?.abort();
+    const ac = new AbortController();
+    voiceMutateAbortRef.current = ac;
+    return ac;
+  }, []);
+
+  useEffect(() => () => {
+    voiceMutateAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     setLocal(getProfile());
@@ -234,10 +248,15 @@ export default function SettingsPage() {
                       tap();
                       const id = voiceSession.userId;
                       if (!id) return;
+                      const ac = beginVoiceMutation();
                       try {
-                        await deleteVoiceTake(id, t.id);
-                      } catch {
-                        /* surface as toast later */
+                        await deleteVoiceTake(id, t.id, { signal: ac.signal });
+                      } catch (e) {
+                        if (!isAbortError(e)) {
+                          /* surface as toast later */
+                        }
+                      } finally {
+                        if (voiceMutateAbortRef.current === ac) voiceMutateAbortRef.current = null;
                       }
                     }}
                     title="Delete take"
@@ -275,7 +294,18 @@ export default function SettingsPage() {
                 className="btn-paper press"
                 onClick={async () => {
                   tap();
-                  if (voiceSession.userId) await deleteVoiceProfile(voiceSession.userId);
+                  const id = voiceSession.userId;
+                  if (!id) return;
+                  const ac = beginVoiceMutation();
+                  try {
+                    await deleteVoiceProfile(id, { signal: ac.signal });
+                  } catch (e) {
+                    if (!isAbortError(e)) {
+                      /* optional toast */
+                    }
+                  } finally {
+                    if (voiceMutateAbortRef.current === ac) voiceMutateAbortRef.current = null;
+                  }
                 }}
                 style={{ fontSize: 12, color: "var(--rose)" }}
               >
@@ -398,11 +428,19 @@ export default function SettingsPage() {
             <button
               className="btn-paper press"
               onClick={async () => {
-                await deleteCurrentVoiceProfile().catch(() => {});
-                resetAll();
-                confirm();
-                setLocal(getProfile());
-                setConfirmReset(false);
+                const ac = beginVoiceMutation();
+                try {
+                  await deleteCurrentVoiceProfile({ signal: ac.signal });
+                  if (ac.signal.aborted) return;
+                  resetAll();
+                  confirm();
+                  setLocal(getProfile());
+                  setConfirmReset(false);
+                } catch (e) {
+                  if (isAbortError(e)) return;
+                } finally {
+                  if (voiceMutateAbortRef.current === ac) voiceMutateAbortRef.current = null;
+                }
               }}
               style={{
                 fontSize: 12,

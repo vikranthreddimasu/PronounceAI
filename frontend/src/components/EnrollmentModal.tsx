@@ -10,6 +10,7 @@ import {
   type VoiceProfile,
 } from "@/lib/voiceProfile";
 import { tap, confirm, release } from "@/lib/sounds";
+import { isAbortError } from "@/lib/abortError";
 
 type Props = {
   open: boolean;
@@ -42,6 +43,7 @@ export default function EnrollmentModal({
   const closeTimerRef = useRef<number | null>(null);
   const stoppingRef = useRef(false);
   const stopAndUploadRef = useRef<() => void>(() => {});
+  const uploadAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (closeTimerRef.current !== null) {
@@ -56,6 +58,8 @@ export default function EnrollmentModal({
       setProfile(null);
       stoppingRef.current = false;
     } else {
+      uploadAbortRef.current?.abort();
+      uploadAbortRef.current = null;
       recorderRef.current?.dispose();
       recorderRef.current = null;
       cancelAnimationFrame(rafRef.current);
@@ -64,6 +68,7 @@ export default function EnrollmentModal({
 
   useEffect(
     () => () => {
+      uploadAbortRef.current?.abort();
       recorderRef.current?.dispose();
       if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
     },
@@ -118,11 +123,13 @@ export default function EnrollmentModal({
     cancelAnimationFrame(rafRef.current);
     release();
     setStep("uploading");
+    const ac = new AbortController();
+    uploadAbortRef.current = ac;
     try {
       const blob = await recorderRef.current.stop();
       const userId = getOrCreateVoiceId();
       const refText = prompts[idx].text;
-      const updated = await addVoiceTake(userId, blob, refText);
+      const updated = await addVoiceTake(userId, blob, refText, { signal: ac.signal });
       setProfile(updated);
       onEnrolled(updated);
       confirm();
@@ -133,9 +140,14 @@ export default function EnrollmentModal({
         setStep("between");
       }
     } catch (e) {
+      if (isAbortError(e)) {
+        setStep("intro");
+        return;
+      }
       setErrorMsg((e as Error).message ?? "Upload failed.");
       setStep("error");
     } finally {
+      if (uploadAbortRef.current === ac) uploadAbortRef.current = null;
       stoppingRef.current = false;
     }
   }, [idx, prompts, onEnrolled, scheduleClose]);

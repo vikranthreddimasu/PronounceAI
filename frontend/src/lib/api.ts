@@ -1,6 +1,16 @@
 import type { AssessmentResult } from "./types";
 import { generateMockResult } from "./mock";
+import { isAbortError } from "./abortError";
 import { speakReference } from "./recorder";
+
+export type NativeAudioFetchOptions = {
+  signal?: AbortSignal;
+};
+
+/** Optional abort for best-effort prewarm / native-audio prefetch. */
+export type WarmPrefetchOptions = {
+  signal?: AbortSignal;
+};
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const FORCE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "1";
@@ -23,14 +33,37 @@ export function isMockMode(): boolean {
   return FORCE_MOCK || !API_URL;
 }
 
+function mockScoreDelay(signal?: AbortSignal): Promise<void> {
+  const ms = 900 + Math.random() * 600;
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const id = window.setTimeout(resolve, ms);
+    const onAbort = () => {
+      window.clearTimeout(id);
+      signal?.removeEventListener("abort", onAbort);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+export type ScoreRecordingOptions = {
+  signal?: AbortSignal;
+};
+
 export async function scoreRecording(
   audioBlob: Blob,
   phraseText: string,
   accent: "GA" | "RP" = "GA",
-  l1: string = "unknown"
+  l1: string = "unknown",
+  options?: ScoreRecordingOptions
 ): Promise<AssessmentResult> {
+  const signal = options?.signal;
   if (isMockMode()) {
-    await new Promise((r) => setTimeout(r, 900 + Math.random() * 600));
+    await mockScoreDelay(signal);
     return generateMockResult(phraseText);
   }
 
@@ -43,6 +76,7 @@ export async function scoreRecording(
   const res = await fetch(`${API_URL}/api/score`, {
     method: "POST",
     body: form,
+    signal,
   });
 
   if (!res.ok) {
@@ -60,21 +94,63 @@ export async function scoreRecording(
 export async function playNativeAudio(
   text: string,
   accent: "GA" | "RP",
-  speed: number = 0.9
+  speed: number = 0.9,
+  opts?: NativeAudioFetchOptions
 ): Promise<void> {
+  const signal = opts?.signal;
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
   if (isMockMode()) {
-    return speakReference(text);
+    return speakReference(text, { signal });
   }
 
-  const blob = await getNativeAudio(text, accent, speed).catch(() => null);
-  if (!blob) return speakReference(text);
+  let blob: Blob | null = null;
+  try {
+    blob = await getNativeAudio(text, accent, speed, signal);
+  } catch (e) {
+    if (isAbortError(e)) throw e;
+    blob = null;
+  }
+  if (!blob) {
+    return speakReference(text, { signal });
+  }
+
   const audioUrl = URL.createObjectURL(blob);
   const audio = new Audio(audioUrl);
 
-  return new Promise((resolve) => {
-    audio.onended = () => { URL.revokeObjectURL(audioUrl); resolve(); };
-    audio.onerror = () => { URL.revokeObjectURL(audioUrl); resolve(); };
-    audio.play().catch(() => { URL.revokeObjectURL(audioUrl); resolve(); });
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const teardown = () => signal?.removeEventListener("abort", onAbort);
+
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      teardown();
+      URL.revokeObjectURL(audioUrl);
+    };
+
+    const onAbort = () => {
+      try {
+        audio.pause();
+      } catch {}
+      done();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort);
+
+    audio.onended = () => {
+      done();
+      resolve();
+    };
+    audio.onerror = () => {
+      done();
+      resolve();
+    };
+    audio.play().catch(() => {
+      done();
+      resolve();
+    });
   });
 }
 
@@ -86,11 +162,25 @@ export async function playNativeAudio(
 export async function prepareNativeAudio(
   text: string,
   accent: "GA" | "RP",
-  speed: number = 0.9
+  speed: number = 0.9,
+  opts?: NativeAudioFetchOptions
 ): Promise<{ audio: HTMLAudioElement; words: { word: string; start_ms: number; end_ms: number }[] } | null> {
   if (isMockMode()) return null;
-  const blob = await getNativeAudio(text, accent, speed).catch(() => null);
+  const signal = opts?.signal;
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+  let blob: Blob | null = null;
+  try {
+    blob = await getNativeAudio(text, accent, speed, signal);
+  } catch (e) {
+    if (isAbortError(e)) throw e;
+    blob = null;
+  }
   if (!blob) return null;
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
   const cleanup = () => URL.revokeObjectURL(url);
@@ -134,36 +224,64 @@ function nativeAudioKey(text: string, accent: "GA" | "RP", speed: number): strin
   return `${accent}:${speed.toFixed(2)}:${text.trim().slice(0, 200)}`;
 }
 
-function getNativeAudio(text: string, accent: "GA" | "RP", speed: number): Promise<Blob> {
+function getNativeAudio(
+  text: string,
+  accent: "GA" | "RP",
+  speed: number,
+  signal?: AbortSignal
+): Promise<Blob> {
   const key = nativeAudioKey(text, accent, speed);
+  const url = `${API_URL}/api/tts?text=${encodeURIComponent(text)}&accent=${accent}&speed=${speed}`;
+
+  if (signal) {
+    return fetch(url, { cache: "force-cache", signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`TTS failed (${res.status})`);
+        return res.blob();
+      })
+      .then((blob) => {
+        remember(nativeAudioCache, key, Promise.resolve(blob));
+        return blob;
+      });
+  }
+
   const cached = nativeAudioCache.get(key);
   if (cached) return cached;
 
-  const url = `${API_URL}/api/tts?text=${encodeURIComponent(text)}&accent=${accent}&speed=${speed}`;
-  const promise = fetch(url, { cache: "force-cache" }).then((res) => {
-    if (!res.ok) throw new Error(`TTS failed (${res.status})`);
-    return res.blob();
-  }).catch((error) => {
-    nativeAudioCache.delete(key);
-    throw error;
-  });
+  const promise = fetch(url, { cache: "force-cache" })
+    .then((res) => {
+      if (!res.ok) throw new Error(`TTS failed (${res.status})`);
+      return res.blob();
+    })
+    .catch((error) => {
+      nativeAudioCache.delete(key);
+      throw error;
+    });
   return remember(nativeAudioCache, key, promise);
 }
 
-export function prefetchNativeAudio(text: string, accent: "GA" | "RP", speed: number = 0.9): void {
+export function prefetchNativeAudio(
+  text: string,
+  accent: "GA" | "RP",
+  speed: number = 0.9,
+  opts?: WarmPrefetchOptions
+): void {
   if (isMockMode() || !text.trim()) return;
-  getNativeAudio(text, accent, speed).catch(() => {
+  const signal = opts?.signal;
+  getNativeAudio(text, accent, speed, signal).catch((e) => {
+    if (isAbortError(e)) return;
     nativeAudioCache.delete(nativeAudioKey(text, accent, speed));
   });
 }
 
-export function prewarmPhrase(text: string, accent: "GA" | "RP"): void {
+export function prewarmPhrase(text: string, accent: "GA" | "RP", opts?: WarmPrefetchOptions): void {
   if (isMockMode() || !text.trim()) return;
   fetch(`${API_URL}/api/prewarm`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phrase: text, accent }),
     keepalive: true,
+    signal: opts?.signal,
   }).catch(() => {
     // Best-effort only; scoring still works without the warm cache.
   });
@@ -173,19 +291,39 @@ export function prewarmPhrase(text: string, accent: "GA" | "RP"): void {
  * Convert the user's recording into the target accent using kNN-VC on the backend.
  * Returns a Blob (audio/wav). Caller is responsible for object-URL lifecycle.
  * In mock mode this throws so the UI can show a "live only" hint.
+ *
+ * When `signal` is passed, caching is skipped so cancellation does not strand other callers on a shared Blob.
  */
 export async function convertAccent(
   audioBlob: Blob,
-  accent: "GA" | "RP"
+  accent: "GA" | "RP",
+  options?: { signal?: AbortSignal }
 ): Promise<Blob> {
   if (isMockMode()) {
     throw new Error("Accent conversion requires the live backend (mock mode is off).");
   }
 
-  return getConvertedAccent(audioBlob, accent);
+  return getConvertedAccent(audioBlob, accent, options?.signal);
 }
 
-function getConvertedAccent(audioBlob: Blob, accent: "GA" | "RP"): Promise<Blob> {
+function getConvertedAccent(audioBlob: Blob, accent: "GA" | "RP", signal?: AbortSignal): Promise<Blob> {
+  if (signal) {
+    const form = new FormData();
+    form.append("audio", audioBlob, "recording.webm");
+    form.append("accent", accent);
+    return fetch(`${API_URL}/api/accent-convert`, {
+      method: "POST",
+      body: form,
+      signal,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const msg = await res.text().catch(() => res.statusText);
+        throw new Error(`Accent conversion failed: ${msg}`);
+      }
+      return res.blob();
+    });
+  }
+
   let byAccent = conversionCache.get(audioBlob);
   if (!byAccent) {
     byAccent = new Map();

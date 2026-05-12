@@ -751,6 +751,26 @@ select {
   gap: 14px;
 }
 
+/*
+ * Eyebrows are global `inline-block`; without a column stack they can wrap onto
+ * the same line as the subtitle and read as “LINEAUTHENTIC” instead of two labels.
+ */
+.line-note-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.line-note-meta .eyebrow {
+  margin: 0;
+}
+
+.line-note-submeta {
+  line-height: 1.35;
+}
+
 .line-note-header span,
 .line-note-footer span {
   color: var(--ink-4);
@@ -782,18 +802,30 @@ select {
 }
 
 .notebook-line {
+  box-sizing: border-box;
   width: 100%;
-  min-height: 88px;
+  display: block;
+  min-height: 56px;
   border: 0;
   background: transparent;
   color: var(--ink);
-  font-family: var(--type-display);
-  font-size: clamp(34px, 5vw, 54px);
-  font-weight: 800;
-  line-height: 1.02;
-  letter-spacing: -0.025em;
+  font-family: var(--type-sans);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
   outline: none;
   resize: none;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  scrollbar-width: none;
+}
+
+.notebook-line::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  background: transparent;
 }
 
 .notebook-line::placeholder { color: var(--ink-5); }
@@ -836,12 +868,31 @@ select {
 
 .notebook-source-search:focus { border-color: var(--ink); }
 
+.notebook-source-count {
+  margin: 0;
+  font-family: var(--type-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+.notebook-source-list {
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+  margin-right: -2px;
+  scrollbar-gutter: stable;
+}
+
 .notebook-source-row {
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 14px;
-  align-items: center;
+  align-items: start;
   border: 0;
   border-bottom: 1px solid var(--rule-soft);
   border-radius: 0;
@@ -864,12 +915,14 @@ select {
 }
 
 .notebook-source-row span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
   font-family: var(--type-display);
   font-size: 16px;
   font-weight: 600;
+  line-height: 1.25;
+  min-width: 0;
 }
 
 .notebook-source-row small {
@@ -1724,6 +1777,49 @@ select {
   border-bottom: 0;
 }
 
+.voice-lab-emotion-label {
+  display: block;
+  margin-top: 10px;
+  color: var(--ink-4);
+  font-family: var(--type-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.voice-lab-emotion-select {
+  margin-top: 6px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  font-family: var(--type-sans);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.voice-lab-emotion-select:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.voice-lab-emotion-detected {
+  margin-top: 6px;
+  color: var(--ink-3);
+  font-family: var(--type-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.voice-lab-emotion-detected strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .voice-lab-action-row > span {
   color: var(--ink-4);
   font-family: var(--type-mono);
@@ -2085,7 +2181,7 @@ select {
   }
 
   .notebook-line {
-    font-size: 32px;
+    font-size: 17px;
   }
 
   .voice-lab-input { font-size: 18px; }

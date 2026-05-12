@@ -13,8 +13,10 @@ export function useVoiceSession(): VoiceSessionState {
 
   useEffect(() => {
     let mounted = true;
+    const ac = new AbortController();
+
     const sync = () => {
-      refreshVoiceSession({ force: true }).catch(() => {});
+      refreshVoiceSession({ force: true, signal: ac.signal }).catch(() => {});
     };
     const unsubscribe = subscribeVoiceSession((next) => {
       if (mounted) setSession(next);
@@ -30,6 +32,7 @@ export function useVoiceSession(): VoiceSessionState {
 
     return () => {
       mounted = false;
+      ac.abort();
       unsubscribe();
       window.removeEventListener("focus", sync);
       document.removeEventListener("visibilitychange", syncVisible);

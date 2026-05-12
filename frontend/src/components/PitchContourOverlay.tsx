@@ -225,12 +225,17 @@ export default function PitchContourOverlay({
 
   return (
     <div className="result-enter w-full">
-      <p
-        className="mb-3 text-xs font-medium uppercase tracking-widest"
-        style={{ color: "var(--ink-4)" }}
-      >
-        Pitch contour
-      </p>
+      <div className="mb-3 space-y-1">
+        <p
+          className="text-xs font-medium uppercase tracking-widest"
+          style={{ color: "var(--ink-4)" }}
+        >
+          Pitch contour
+        </p>
+        <p className="text-[10px] leading-snug m-0" style={{ color: "var(--ink-5)", maxWidth: "52ch" }}>
+          Compared from speech onset (leading silence trimmed so both traces start near where voicing begins).
+        </p>
+      </div>
 
       <div
         style={{

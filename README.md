@@ -1,20 +1,19 @@
 # PronounceAI
 
-A pronunciation coach that tells you *why*. Record a phrase; see a transcript, a 0–100 score, and which of three dimensions — clarity, pitch, energy — to fix.
+A pronunciation coach that tells you *why*. Practice a line and get phoneme-level feedback, scores (clarity-related dimensions), transcript alignment, optional pitch overlays, and a calm coaching summary. **Voice Lab** lets you enrol a short voice profile and hear arbitrary text in your timbre toward a target accent (CosyVoice + Kokoro pipelines on the backend).
 
 ## Repo layout
 
 ```
 PronounceAI/
-├── model/
-│   ├── module_1/   # Whisper STT (transcript)
-│   └── module_2/   # Acoustic feature scoring (per-dimension)
-├── frontend/       # Next.js single-screen app (this is what users see)
-├── API.md          # Backend contract the frontend expects
+├── backend/           # FastAPI service — scoring, TTS, voice enrollment, accent tools
+├── frontend/          # Next.js app (Practice, Voice Lab, Progress, Settings, …)
+├── docs/              # Design / planning notes
+├── API.md             # HTTP contract the frontend consumes
 └── README.md
 ```
 
-The two `model/` modules document the ML pipeline (notebooks). The `frontend/` is the deployable product surface.
+Older notebooks or training helpers may live under `backend/training` and `backend/evaluation`; the running product is **`backend/app`** + **`frontend`**.
 
 ## Run the frontend
 
@@ -24,19 +23,36 @@ npm install
 npm run dev
 ```
 
-Visit `http://localhost:3000`. With no backend configured the app runs in **demo mode** — scores are fabricated but plausible, and native playback uses the browser's TTS so the full UI is exercisable end-to-end.
+Visit `http://localhost:3000`. With no backend configured the app runs in **demo mode** — scores are mocked, and native reference playback uses the browser’s Speech Synthesis API so the UI is usable end-to-end.
 
-To wire it to the real backend (Module 1 + Module 2 served as one HTTP service):
+To use the live API:
 
 ```bash
 cd frontend
-NEXT_PUBLIC_API_URL=http://<host>:<port> npm run dev
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 npm run dev
 ```
 
-See [`API.md`](./API.md) for the exact contract the backend must implement.
+Copy `frontend/.env.example` to `.env.local` and set `NEXT_PUBLIC_API_URL` there if you prefer.
 
-## What v1 is — and isn't
+## Run the backend
 
-**Is**: one screen. Pick a phrase, hear native, record yourself, see score + three dimension bars + one line of feedback. 20 built-in phrases, easy to hard.
+From `backend/` (Python env with deps installed per your setup):
 
-**Isn't**: accounts, history, streaks, custom phrases, multi-language, waveform visualisations. Cut intentionally; can be added when the loop is proven.
+```bash
+# Typical local run (adjust host/port as needed)
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Use `backend/.env.example` as a template for `backend/.env.local`. Model checkpoints and CUDA/MPS settings are documented in those files.
+
+See [`API.md`](./API.md) for routes and payloads.
+
+## Main user flows
+
+- **Practice** (`/practice`) — Pick or type a phrase, hear target TTS (`/api/tts`), record, **`POST /api/score`**, review phonemes and prosody cues. Progress is stored only in **localStorage** (no accounts).
+- **Voice Lab** (`/studio`) — Enrol with **`POST /api/voice/enroll`**, then **`POST /api/voice/speak`** for playback with timings. Requires the voice-clone stack to be loaded on the server.
+- **Progress / Settings** — Read and clear local session stats and preferences.
+
+## Intentional v1 boundaries
+
+Designed as a tight feedback loop without server-side accounts: history and voice handles live in the browser; the backend holds enrollment WAVs keyed by opaque `user_id`. Features such as synced history, teams, or multi-device profiles would need an auth and storage layer on top.

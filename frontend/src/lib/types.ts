@@ -26,11 +26,15 @@ export type FeedbackTip = {
  * Pitch contour — F0 over time, z-score normalised within voiced frames.
  * Same length for native + user so they overlay on a shared x-axis.
  * Unvoiced frames are `null` (so the line breaks naturally).
+ *
+ * Backend aligns both curves by **speech onset** (leading / trailing silence
+ * trimmed before resampling); `duration_ms` approximates the longer voiced span
+ * used for hover timing and playback playhead pacing.
  */
 export type PitchContour = {
   native: (number | null)[];
   user: (number | null)[];
-  duration_ms: number;  // total span the contour represents
+  duration_ms: number;
 };
 
 export type AssessmentResult = {

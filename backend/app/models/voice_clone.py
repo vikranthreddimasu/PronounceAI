@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -55,6 +56,40 @@ SHORT_ACCENT_TAG: dict[str, str] = {
     "GA": "American accent.",
     "RP": "British accent.",
 }
+
+# Single-word style noun appended to the accent clause. CV3 recites long
+# imperative prompts ("Speak happily in American accent.") aloud, so we keep
+# the emotion to a terse trailing tag instead.
+EMOTION_TAGS: dict[str, str] = {
+    "neutral": "",
+    "happy": "Happy.",
+    "sad": "Sad.",
+    "angry": "Angry.",
+    "excited": "Excited.",
+    "calm": "Calm.",
+    "whisper": "Whisper.",
+}
+
+DEFAULT_EMOTION = "neutral"
+
+# CosyVoice 3 inline prosody markers (<laughter>, [breath], etc). Pass
+# through to synth; strip from text used for whisper validation so they
+# don't tank coverage. CV2-style [happy]/[surprised] tokens are NOT used
+# anymore — CV3 speaks them as literal text ("S. Orbis", "Ope-Tay-Tess").
+INLINE_MARKER_RE = re.compile(r"<[^>]+>|\[[^\]]+\]")
+
+# Words that, if present in the synth transcript but not the input text,
+# strongly suggest the LLM recited the instruct prompt aloud.
+_INSTRUCT_LEAK_TERMS = (
+    "american accent",
+    "british accent",
+    "speak happily",
+    "speak sadly",
+    "speak angrily",
+    "speak excitedly",
+    "speak calmly",
+    "in a whisper",
+)
 
 # Verbose forms kept ONLY for the legacy clone() shim; not used by speak().
 ACCENT_INSTRUCTIONS: dict[str, str] = {
@@ -105,6 +140,28 @@ class VoiceClone:
 
     def supported_accents(self) -> list[str]:
         return list(KOKORO_VOICE_MAP.keys())
+
+    def supported_emotions(self) -> list[str]:
+        return list(EMOTION_TAGS.keys())
+
+    @staticmethod
+    def _normalize_emotion(emotion: str | None) -> str:
+        if not emotion:
+            return DEFAULT_EMOTION
+        key = emotion.strip().lower()
+        return key if key in EMOTION_TAGS else DEFAULT_EMOTION
+
+    @staticmethod
+    def _compose_instruct_tag(accent: str, emotion: str) -> str:
+        accent_phrase = SHORT_ACCENT_TAG[accent]
+        emotion_phrase = EMOTION_TAGS.get(emotion, "")
+        if emotion_phrase:
+            return f"{accent_phrase} {emotion_phrase}"
+        return accent_phrase
+
+    @staticmethod
+    def _strip_inline_markers(text: str) -> str:
+        return INLINE_MARKER_RE.sub(" ", text)
 
     def instruction_for(self, accent: str) -> str:
         return ACCENT_INSTRUCTIONS.get(accent.upper(), ACCENT_INSTRUCTIONS["GA"])
@@ -201,9 +258,15 @@ class VoiceClone:
 
     # ─── Path 2: instruct mode (best accent control) ───────────────────
 
-    def _speak_instruct(self, text: str, ref_audio_path: Path, accent: str) -> Path:
+    def _speak_instruct(
+        self,
+        text: str,
+        ref_audio_path: Path,
+        accent: str,
+        emotion: str = DEFAULT_EMOTION,
+    ) -> Path:
         from mlx_audio.tts.generate import generate_audio
-        tag = SHORT_ACCENT_TAG[accent]
+        tag = self._compose_instruct_tag(accent, emotion)
         _, file_prefix = self._new_tempfile()
         # Force instruct dispatch in CosyVoice 3: ref_text=None means the
         # `ref_text` branch is skipped, so `instruct_text` wins.
@@ -280,18 +343,35 @@ class VoiceClone:
             logger.warning(f"voice_clone: stt failed: {e}")
             return {"text": "", "words": []}
 
+    @staticmethod
+    def _instruct_leaked(expected_text: str, transcript: str) -> bool:
+        """Detect when CV3 recited the instruct prompt aloud.
+
+        We compare against the *expected* text — leak terms are flagged only
+        when they appear in the transcript but not in the user's input.
+        """
+        t = (transcript or "").lower()
+        e = (expected_text or "").lower()
+        for term in _INSTRUCT_LEAK_TERMS:
+            if term in t and term not in e:
+                return True
+        return False
+
     def _validate(self, expected_text: str, transcript: str) -> tuple[bool, dict]:
         """Pure metric check — caller supplies the transcript."""
         coverage, length_ratio, seq_sim = self._word_metrics(expected_text, transcript)
+        leaked = self._instruct_leaked(expected_text, transcript)
         passes = (
             coverage >= MIN_WORD_COVERAGE
             and length_ratio <= MAX_LENGTH_RATIO
             and seq_sim >= MIN_SEQUENCE_SIM
+            and not leaked
         )
         return passes, {
             "coverage": round(coverage, 3),
             "length_ratio": round(length_ratio, 3),
             "seq_sim": round(seq_sim, 3),
+            "leaked": leaked,
             "transcript_preview": transcript[:80],
         }
 
@@ -344,23 +424,36 @@ class VoiceClone:
         accent: str,
         ref_text: str = "",
         strategy: str = "target_accent",
+        emotion: str = DEFAULT_EMOTION,
         out_path: str | Path | None = None,
     ) -> VoiceSynthesisResult:
         """Synthesize `text` in the user's voice.
 
         `strategy="target_accent"` uses VC-first for accent consistency.
         `strategy="natural"` uses zero-shot first and preserves the enrolled
-        accent more strongly.
+        accent more strongly. `emotion` is a key from EMOTION_TAGS — anything
+        other than "neutral" forces instruct-first because VC source audio
+        (Kokoro) is prosodically flat.
         """
         accent = accent.upper()
         if accent not in KOKORO_VOICE_MAP:
             raise ValueError(f"Unsupported accent: {accent}")
+        emotion = self._normalize_emotion(emotion)
         ref_path = Path(ref_audio_path)
         if not ref_path.exists():
             raise FileNotFoundError(f"Reference audio not found: {ref_path}")
 
         t_total = time.perf_counter()
         strategy_name, order = self._strategy_order(strategy)
+        if emotion != DEFAULT_EMOTION:
+            # VC erases emotion (flat Kokoro source). Zero-shot ignores
+            # instruct_text. Only instruct mode carries the emotion clause.
+            order = ("instruct",) + tuple(m for m in order if m != "instruct")
+
+        # Inline prosody markers (<laughter>, [breath]) pass through to the
+        # synth but must be stripped from the text used for validation —
+        # whisper transcripts won't contain them.
+        validation_text = self._strip_inline_markers(text)
 
         for mode in order:
             if mode == "zero_shot" and not ref_text.strip():
@@ -371,11 +464,11 @@ class VoiceClone:
                     out = self._speak_vc(text, ref_path, accent)
                     t_vc = time.perf_counter() - t0
                     t1 = time.perf_counter()
-                    words, metrics = self._timings_for_output(text, out)
+                    words, metrics = self._timings_for_output(validation_text, out)
                     t_stt = time.perf_counter() - t1
                     logger.info(
                         f"voice_clone.speak: text={len(text)}c accent={accent} "
-                        f"strategy={strategy_name} mode=vc "
+                        f"emotion={emotion} strategy={strategy_name} mode=vc "
                         f"({t_vc:.1f}s synth + {t_stt:.1f}s stt, "
                         f"total {time.perf_counter()-t_total:.1f}s) metrics={metrics}"
                     )
@@ -396,7 +489,7 @@ class VoiceClone:
                 if mode == "zero_shot":
                     path = self._speak_zero_shot(text, ref_path, ref_text)
                 else:
-                    path = self._speak_instruct(text, ref_path, accent)
+                    path = self._speak_instruct(text, ref_path, accent, emotion)
                 t_synth = time.perf_counter() - t0
             except Exception as e:
                 t_synth = time.perf_counter() - t0
@@ -406,15 +499,15 @@ class VoiceClone:
             t1 = time.perf_counter()
             stt = self._transcribe_with_words(path)
             t_val = time.perf_counter() - t1
-            passes, metrics = self._validate(text, stt.get("text", ""))
+            passes, metrics = self._validate(validation_text, stt.get("text", ""))
             if passes:
                 logger.info(
                     f"voice_clone.speak: text={len(text)}c accent={accent} "
-                    f"strategy={strategy_name} mode={mode} "
+                    f"emotion={emotion} strategy={strategy_name} mode={mode} "
                     f"({t_synth:.1f}s synth + {t_val:.1f}s stt) "
                     f"metrics={metrics}"
                 )
-                words = stt.get("words", []) or self._estimate_word_timings(text, path)
+                words = stt.get("words", []) or self._estimate_word_timings(validation_text, path)
                 return VoiceSynthesisResult(
                     path=path,
                     words=words,
