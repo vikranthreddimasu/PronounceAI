@@ -39,6 +39,19 @@ export type AssessmentResult = {
   feedback: FeedbackTip[];   // deprecated — kept for backwards compat; not rendered
   overall: number;
   pitch_contour?: PitchContour;
+  transcript?: {
+    text: string;
+    words?: Array<{ word: string; start_ms: number; end_ms: number; probability?: number }>;
+    language_probability?: number;
+  };
+  wer?: number | null;
+  debug?: {
+    elapsed_ms?: number;
+    accent_score?: number | null;
+    npvi?: number | null;
+    speech_rate_sps?: number | null;
+    formants?: Record<string, { f1: number; f2: number; f3: number }>;
+  };
 };
 
 export type Phrase = {

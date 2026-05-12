@@ -12,7 +12,8 @@ export function isMockMode(): boolean {
 export async function scoreRecording(
   audioBlob: Blob,
   phraseText: string,
-  accent: "GA" | "RP" = "GA"
+  accent: "GA" | "RP" = "GA",
+  l1: string = "unknown"
 ): Promise<AssessmentResult> {
   if (isMockMode()) {
     await new Promise((r) => setTimeout(r, 900 + Math.random() * 600));
@@ -23,6 +24,7 @@ export async function scoreRecording(
   form.append("audio", audioBlob, "recording.webm");
   form.append("phrase", phraseText);
   form.append("accent", accent);
+  form.append("l1", l1 || "unknown");
 
   const res = await fetch(`${API_URL}/api/score`, {
     method: "POST",

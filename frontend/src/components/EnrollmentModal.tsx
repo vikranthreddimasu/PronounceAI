@@ -182,7 +182,7 @@ export default function EnrollmentModal({
                 fontWeight: 700,
                 marginTop: 4,
                 color: "var(--ink)",
-                letterSpacing: "-0.015em",
+                letterSpacing: 0,
               }}
             >
               {current.label}
@@ -201,9 +201,12 @@ export default function EnrollmentModal({
               color: "var(--ink-3)",
               fontSize: 16,
               lineHeight: 1,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            ×
+            <CloseIcon />
           </button>
         </div>
 
@@ -235,7 +238,7 @@ export default function EnrollmentModal({
               fontWeight: 500,
               color: "var(--ink)",
               lineHeight: 1.45,
-              letterSpacing: "-0.005em",
+              letterSpacing: 0,
             }}
           >
             {current.text}
@@ -332,7 +335,7 @@ export default function EnrollmentModal({
                 display: "block",
               }}
             />
-            <p style={{ fontSize: 12, color: "var(--ink-3)" }}>Saving take {idx + 1}…</p>
+            <p style={{ fontSize: 12, color: "var(--ink-3)" }}>Saving take {idx + 1}...</p>
           </div>
         )}
 
@@ -365,7 +368,7 @@ export default function EnrollmentModal({
               onClick={nextPrompt}
               style={{ width: "100%", padding: "12px 0", fontSize: 13 }}
             >
-              Next: {prompts[idx + 1]?.label} →
+              Next: {prompts[idx + 1]?.label}
             </button>
             <button
               className="btn-paper btn-ghost press"
@@ -401,7 +404,7 @@ export default function EnrollmentModal({
             </div>
             <p
               className="font-display"
-              style={{ fontSize: 16, color: "var(--ink)", fontWeight: 700, letterSpacing: "-0.01em" }}
+              style={{ fontSize: 16, color: "var(--ink)", fontWeight: 700, letterSpacing: 0 }}
             >
               Voice profile saved
             </p>
@@ -447,5 +450,23 @@ export default function EnrollmentModal({
         )}
       </div>
     </div>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      aria-hidden
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="M6 6l12 12" />
+      <path d="M18 6L6 18" />
+    </svg>
   );
 }

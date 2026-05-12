@@ -6,13 +6,36 @@ import { useEffect, useState } from "react";
 import { getStreak, subscribeStorage } from "@/lib/store";
 import { tap } from "@/lib/sounds";
 
-const LINKS = [
-  { href: "/practice", label: "Practice" },
-  { href: "/studio", label: "Studio" },
-  { href: "/library", label: "Library" },
-  { href: "/progress", label: "Progress" },
-  { href: "/history", label: "History" },
+type RailItem = {
+  href: string;
+  label: string;
+  meta: string;
+  aliases?: string[];
+};
+
+const NOTEBOOKS: RailItem[] = [
+  {
+    href: "/practice",
+    label: "Pronunciation notebook",
+    meta: "Current session",
+    aliases: ["/practice"],
+  },
+  {
+    href: "/progress",
+    label: "Learning notebook",
+    meta: "History and progress",
+    aliases: ["/progress", "/history"],
+  },
 ];
+
+const TOOLS: RailItem[] = [
+  { href: "/library", label: "Phrase shelf", meta: "Choose a line" },
+  { href: "/studio", label: "Voice experiment", meta: "Render your voice" },
+];
+
+function isActive(path: string, href: string, aliases?: string[]): boolean {
+  return path === href || Boolean(aliases?.some((alias) => path.startsWith(alias)));
+}
 
 export default function NavBar() {
   const path = usePathname();
@@ -24,118 +47,164 @@ export default function NavBar() {
     return subscribeStorage(sync);
   }, []);
 
-  // Hide on landing — the marketing page has its own header
   if (path === "/") return null;
 
   return (
-    <header
-      className="nav-paper sticky top-0"
-      style={{ zIndex: 30, paddingInline: "max(20px, env(safe-area-inset-left))" }}
-    >
-      <div
-        className="mx-auto flex items-center justify-between"
-        style={{ maxWidth: 1180, height: 60 }}
-      >
+    <>
+      <aside className="notebook-rail" aria-label="Notebook navigation">
         <Link
           href="/practice"
-          className="press flex items-center"
+          className="rail-brand press"
           onClick={() => tap()}
-          style={{ gap: 8, color: "var(--ink)" }}
+          aria-label="PronounceAI session"
         >
-          <Mark />
-          <span
-            className="font-display"
-            style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}
-          >
-            PronounceAI
+          <span className="brand-mark" aria-hidden>
+            <Mark />
+          </span>
+          <span>
+            <strong>PronounceAI</strong>
+            <small>Accent lab</small>
           </span>
         </Link>
 
-        <nav className="hidden md:flex items-center" style={{ gap: 2 }}>
-          {LINKS.map((l) => {
-            const active = path === l.href || (l.href !== "/practice" && path.startsWith(l.href));
-            return (
-              <Link
-                key={l.href}
-                href={l.href}
-                onClick={() => tap()}
-                className="nav-link"
-                data-active={active}
-              >
-                {l.label}
-              </Link>
-            );
-          })}
+        <nav className="rail-section" aria-label="Notebooks">
+          <p className="rail-kicker">Notebooks</p>
+          {NOTEBOOKS.map((item) => (
+            <RailLink key={item.href} item={item} active={isActive(path, item.href, item.aliases)} />
+          ))}
         </nav>
 
-        <div className="flex items-center" style={{ gap: 10 }}>
+        <nav className="rail-section" aria-label="Tools">
+          <p className="rail-kicker">Tools</p>
+          {TOOLS.map((item) => (
+            <RailLink key={item.href} item={item} active={isActive(path, item.href)} />
+          ))}
+        </nav>
+
+        <div className="rail-bottom">
           {streak > 0 && (
-            <span
-              className="tag tag-accent"
-              title={`${streak}-day streak`}
-              aria-label={`${streak} day streak`}
-            >
-              <span aria-hidden style={{ fontSize: 10 }}>◦</span>
-              {streak}d
+            <span className="rail-streak" title={`${streak}-day streak`}>
+              {streak}d streak
             </span>
           )}
           <Link
             href="/settings"
-            className="press nav-link"
+            className="rail-settings press"
             data-active={path.startsWith("/settings")}
             onClick={() => tap()}
             aria-label="Settings"
           >
-            <Gear />
+            <SettingsIcon />
+            <span>Settings</span>
           </Link>
         </div>
-      </div>
+      </aside>
 
-      {/* Mobile nav — same links, scrollable */}
-      <nav
-        className="md:hidden no-scrollbar flex items-center"
-        style={{
-          gap: 2,
-          padding: "6px 16px 10px",
-          overflowX: "auto",
-          borderTop: "1px solid var(--line)",
-        }}
-      >
-        {LINKS.map((l) => {
-          const active = path === l.href || (l.href !== "/practice" && path.startsWith(l.href));
-          return (
+      <header className="mobile-nav-paper">
+        <div className="mobile-nav-top">
+          <Link
+            href="/practice"
+            className="press flex items-center"
+            onClick={() => tap()}
+            style={{ gap: 10, color: "var(--ink)", minWidth: 0 }}
+            aria-label="PronounceAI session"
+          >
+            <span className="brand-mark" aria-hidden>
+              <Mark />
+            </span>
+            <span className="font-display" style={{ fontSize: 17, fontWeight: 680, letterSpacing: 0 }}>
+              PronounceAI
+            </span>
+          </Link>
+          <Link
+            href="/settings"
+            className="icon-button press"
+            data-active={path.startsWith("/settings")}
+            onClick={() => tap()}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <SettingsIcon />
+          </Link>
+        </div>
+        <nav className="mobile-nav-row no-scrollbar" aria-label="Mobile navigation">
+          {[...NOTEBOOKS, ...TOOLS].map((item) => (
             <Link
-              key={l.href}
-              href={l.href}
+              key={item.href}
+              href={item.href}
               onClick={() => tap()}
               className="nav-link"
-              data-active={active}
-              style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+              data-active={isActive(path, item.href, item.aliases)}
+              aria-current={isActive(path, item.href, item.aliases) ? "page" : undefined}
             >
-              {l.label}
+              {item.label.replace(" notebook", "").replace(" experiment", "")}
             </Link>
-          );
-        })}
-      </nav>
-    </header>
+          ))}
+        </nav>
+      </header>
+    </>
+  );
+}
+
+function RailLink({
+  item,
+  active,
+}: {
+  item: RailItem;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={item.href}
+      onClick={() => tap()}
+      className="rail-link press"
+      data-active={active}
+      aria-current={active ? "page" : undefined}
+    >
+      <span className="rail-dot" aria-hidden />
+      <span>
+        <strong>{item.label}</strong>
+        <small>{item.meta}</small>
+      </span>
+    </Link>
   );
 }
 
 function Mark() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="12" cy="12" r="9" stroke="var(--accent)" />
-      <path d="M8 12c0-3 2-5 4-5s4 2 4 5-2 5-4 5" stroke="var(--accent)" />
-      <circle cx="16" cy="12" r="1.2" fill="var(--accent)" stroke="none" />
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M5 12a7 7 0 0 1 7-7 7 7 0 0 1 7 7 7 7 0 0 1-7 7" />
+      <path d="M9 12a3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3" />
+      <path d="M12 12h7" />
     </svg>
   );
 }
 
-function Gear() {
+function SettingsIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 0 1-4 0v-.07a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 0 1 0-4h.04A1.7 1.7 0 0 0 4.6 8a1.7 1.7 0 0 0-.34-1.88l-.05-.05a2 2 0 1 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 8.97 3.6 1.7 1.7 0 0 0 10 2.04V2a2 2 0 0 1 4 0v.04a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 8c.21.6.79 1 1.42 1H21a2 2 0 0 1 0 4h-.18c-.63 0-1.21.4-1.42 1Z" />
     </svg>
   );
 }

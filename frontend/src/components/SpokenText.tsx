@@ -9,7 +9,7 @@ type Props = {
   audio: HTMLAudioElement | null;
   /** Whether audio is currently playing. Drives the RAF loop. */
   playing: boolean;
-  /** Sizing hint — "lg" for hero phrase, "md" default. */
+  /** Sizing hint: "lg" for hero phrase, "md" default. */
   size?: "md" | "lg";
 };
 
@@ -47,7 +47,7 @@ export default function SpokenText({ words, audio, playing, size = "md" }: Props
     const tick = () => {
       if (!audio) return;
       const t = audio.currentTime * 1000;
-      // Find current word — advance from lastIdx for O(1) amortised
+      // Advance from lastIdx for amortized O(1) word lookup.
       let idx = lastIdx;
       while (idx + 1 < words.length && t >= words[idx + 1].start_ms) {
         idx++;
@@ -87,7 +87,7 @@ export default function SpokenText({ words, audio, playing, size = "md" }: Props
           fontWeight: 500,
           color: "var(--ink-4)",
           lineHeight,
-          letterSpacing: "-0.005em",
+          letterSpacing: 0,
           margin: 0,
         }}
         aria-live="polite"

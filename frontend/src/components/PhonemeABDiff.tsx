@@ -15,7 +15,7 @@ type Props = {
 type Step = "idle" | "native-1" | "user" | "native-2";
 
 /**
- * Pick the worst phoneme — lowest gop among incorrect, else lowest gop overall.
+ * Pick the worst phoneme: lowest gop among incorrect, else lowest gop overall.
  * Returns null if there's nothing meaningfully wrong.
  */
 function pickWorst(phonemes: PhonemeResult[]): PhonemeResult | null {
@@ -105,12 +105,14 @@ export default function PhonemeABDiff({
           border: "1px solid var(--line)",
         }}
       >
-        {/* Worst phoneme — IPA hero glyphs */}
+        {/* Worst phoneme IPA glyphs */}
         <div className="flex items-center gap-3" style={{ marginBottom: 14 }}>
           {subFrom ? (
             <>
               <PhonemeGlyph ipa={subFrom} tone="rose" label="you" />
-              <span style={{ fontSize: 14, color: "var(--ink-4)" }}>→</span>
+              <span style={{ fontSize: 10, color: "var(--ink-4)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                to
+              </span>
               <PhonemeGlyph ipa={subTo} tone="jade" label="target" />
             </>
           ) : (
@@ -128,7 +130,7 @@ export default function PhonemeABDiff({
           </p>
         </div>
 
-        {/* Zone track — where in the utterance the bad phoneme sits */}
+        {/* Zone track showing where the phoneme sits in the utterance. */}
         <div
           style={{
             position: "relative",
@@ -203,7 +205,7 @@ export default function PhonemeABDiff({
             transition: "all 180ms var(--ease-out)",
           }}
         >
-          {step === "idle" ? "Play A → B → A" : "Playing…"}
+          {step === "idle" ? "Play native, you, native" : "Playing..."}
         </button>
       </div>
     </div>

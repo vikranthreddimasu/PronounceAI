@@ -35,7 +35,7 @@ export default function RecordButton({ state, onRecord, onStop, getLevel }: Prop
 
   return (
     <div className="relative flex items-center justify-center" style={{ width: SIZE + 44, height: SIZE + 44 }}>
-      {/* Outer voice rings — recording only */}
+      {/* Outer voice rings while recording. */}
       {state === "recording" && (
         <>
           <span
@@ -71,7 +71,7 @@ export default function RecordButton({ state, onRecord, onStop, getLevel }: Prop
         aria-label={
           state === "idle" ? "Start recording" :
           state === "recording" ? "Stop recording" :
-          "Analyzing…"
+          "Analyzing..."
         }
       >
         {/* Icon */}
