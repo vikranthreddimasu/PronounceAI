@@ -78,6 +78,58 @@ export async function playNativeAudio(
   });
 }
 
+/**
+ * Prepare a native-audio HTMLAudioElement plus per-word timings (estimated
+ * proportionally to character count). Returns null in mock mode where we
+ * fall back to the Web Speech API.
+ */
+export async function prepareNativeAudio(
+  text: string,
+  accent: "GA" | "RP",
+  speed: number = 0.9
+): Promise<{ audio: HTMLAudioElement; words: { word: string; start_ms: number; end_ms: number }[] } | null> {
+  if (isMockMode()) return null;
+  const blob = await getNativeAudio(text, accent, speed).catch(() => null);
+  if (!blob) return null;
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  const cleanup = () => URL.revokeObjectURL(url);
+  audio.addEventListener("ended", cleanup, { once: true });
+  audio.addEventListener("error", cleanup, { once: true });
+  const words = await estimateNativeWordTimings(text, audio);
+  return { audio, words };
+}
+
+async function estimateNativeWordTimings(
+  text: string,
+  audio: HTMLAudioElement
+): Promise<{ word: string; start_ms: number; end_ms: number }[]> {
+  const tokens = text.match(/\S+/g) ?? [];
+  if (tokens.length === 0) return [];
+  const totalMs = await new Promise<number>((resolve) => {
+    if (audio.readyState >= 1 && Number.isFinite(audio.duration) && audio.duration > 0) {
+      resolve(audio.duration * 1000);
+      return;
+    }
+    const onMeta = () => {
+      audio.removeEventListener("loadedmetadata", onMeta);
+      const dur = Number.isFinite(audio.duration) ? audio.duration * 1000 : tokens.length * 380;
+      resolve(dur);
+    };
+    audio.addEventListener("loadedmetadata", onMeta);
+    setTimeout(() => resolve(tokens.length * 380), 800);
+  });
+  const weights = tokens.map((t) => Math.max(1, t.replace(/[^A-Za-z]/g, "").length));
+  const total = weights.reduce((s, w) => s + w, 0) || tokens.length;
+  let cursor = 0;
+  return tokens.map((word, i) => {
+    const share = (weights[i] / total) * totalMs;
+    const start = cursor;
+    cursor = start + share;
+    return { word, start_ms: Math.round(start), end_ms: Math.round(cursor) };
+  });
+}
+
 function nativeAudioKey(text: string, accent: "GA" | "RP", speed: number): string {
   return `${accent}:${speed.toFixed(2)}:${text.trim().slice(0, 200)}`;
 }

@@ -106,15 +106,53 @@ def quality_gate(wav: torch.Tensor, sr: int) -> None:
                 raise AudioError(f"Too much background noise (SNR {snr:.0f} dB). Please record in a quieter environment.")
 
 
+SILENCE_FRAME_MS = 20
+SILENCE_PREROLL_MS = 80
+SILENCE_RMS_FLOOR = 0.012
+
+
+def trim_leading_silence(wav: torch.Tensor, sr: int) -> torch.Tensor:
+    """
+    Strip leading silence so downstream alignment / pitch contour starts at speech
+    onset rather than button-press timestamp. Uses short-window RMS with a small
+    pre-roll buffer so we don't bite into the first phoneme attack.
+    """
+    if wav.ndim != 2 or wav.shape[-1] < sr // 5:
+        return wav
+    frame = max(1, int(sr * SILENCE_FRAME_MS / 1000))
+    pcm = wav[0]
+    if pcm.shape[0] < frame * 2:
+        return wav
+    # Trim to multiple of frame to vectorise RMS
+    usable = pcm.shape[0] - (pcm.shape[0] % frame)
+    frames = pcm[:usable].view(-1, frame)
+    rms = frames.pow(2).mean(dim=1).sqrt()
+    if rms.numel() == 0:
+        return wav
+    peak = float(rms.max().item())
+    threshold = max(SILENCE_RMS_FLOOR, peak * 0.18)
+    voiced = (rms >= threshold).nonzero(as_tuple=False)
+    if voiced.numel() == 0:
+        return wav
+    onset_frame = int(voiced[0].item())
+    preroll_frames = max(1, int(SILENCE_PREROLL_MS / SILENCE_FRAME_MS))
+    onset_frame = max(0, onset_frame - preroll_frames)
+    onset_sample = onset_frame * frame
+    if onset_sample <= frame:
+        return wav
+    return wav[..., onset_sample:].contiguous()
+
+
 def preprocess(data: bytes) -> tuple[torch.Tensor, int]:
     """
     Full preprocessing pipeline:
-      load → mono → quality gate → resample to 16kHz
+      load → mono → quality gate → resample to 16kHz → trim leading silence
     Returns (wav_16k [1, T], 16000)
     """
     wav, sr = load_audio(data)
     quality_gate(wav, sr)
     wav = resample(wav, sr, TARGET_SR)
+    wav = trim_leading_silence(wav, TARGET_SR)
     # Peak-normalise
     peak = wav.abs().max()
     if peak > 0:

@@ -3,15 +3,18 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Accent, AssessmentResult, PhonemeResult, Scores } from "@/lib/types";
-import { PHRASES, CATEGORY_LABELS } from "@/lib/phrases";
+import { CATEGORY_LABELS, shuffledPhrases } from "@/lib/phrases";
 import { createRecorder, type Recorder } from "@/lib/recorder";
 import {
   scoreRecording,
   playNativeAudio,
   prefetchNativeAudio,
+  prepareNativeAudio,
   prewarmPhrase,
   isMockMode,
 } from "@/lib/api";
+import SpokenText from "@/components/SpokenText";
+import type { WordTiming } from "@/lib/voiceProfile";
 import { useCountUp } from "@/lib/useCountUp";
 import { appendSession, getProfile, setProfile, subscribeStorage } from "@/lib/store";
 import { tap, confirm, release } from "@/lib/sounds";
@@ -124,7 +127,8 @@ export default function PracticePage() {
 
 function PracticeInner() {
   const searchParams = useSearchParams();
-  const initialPhrase = PHRASES[0];
+  const phraseList = useMemo(() => shuffledPhrases(), []);
+  const initialPhrase = phraseList[0];
   const [phraseIdx, setPhraseIdx] = useState(0);
   const [selectedPhraseId, setSelectedPhraseId] = useState<string | null>(initialPhrase.id);
   const [text, setText] = useState(initialPhrase.text);
@@ -140,15 +144,22 @@ function PracticeInner() {
   const recorderRef = useRef<Recorder | null>(null);
   const userAudioRef = useRef<HTMLAudioElement | null>(null);
   const userAudioUrlRef = useRef<string | null>(null);
+  const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [playback, setPlayback] = useState<{
+    audio: HTMLAudioElement;
+    words: WordTiming[];
+    kind: "native" | "user";
+  } | null>(null);
+  const [playing, setPlaying] = useState(false);
 
   const cleanText = text.trim();
-  const selectedPhrase = selectedPhraseId ? PHRASES.find((p) => p.id === selectedPhraseId) ?? null : null;
+  const selectedPhrase = selectedPhraseId ? phraseList.find((p) => p.id === selectedPhraseId) ?? null : null;
   const mode: SessionMode = selectedPhrase && selectedPhrase.text === cleanText ? "phrases" : "free";
   const canRecord = cleanText.length >= MIN_TEXT;
   const weak = useMemo(() => (result ? weakestPhoneme(result.phonemes) : null), [result]);
   const lowest = useMemo(() => (result ? lowestDimension(result.scores) : null), [result]);
   const sessionState = stateCopy(phase, !!result);
-  const progressPct = ((phraseIdx + 1) / PHRASES.length) * 100;
+  const progressPct = ((phraseIdx + 1) / phraseList.length) * 100;
 
   const clearRecording = useCallback(() => {
     if (userAudioUrlRef.current) {
@@ -169,7 +180,7 @@ function PracticeInner() {
       prewarmPhrase(cleanText, accent);
       prefetchNativeAudio(cleanText, accent);
     }, mode === "phrases" ? 80 : 420);
-    const next = PHRASES[(phraseIdx + 1) % PHRASES.length];
+    const next = phraseList[(phraseIdx + 1) % phraseList.length];
     const nextTimer = next ? window.setTimeout(() => {
       prewarmPhrase(next.text, accent);
       prefetchNativeAudio(next.text, accent);
@@ -183,9 +194,9 @@ function PracticeInner() {
   useEffect(() => {
     const id = searchParams.get("phrase");
     if (!id) return;
-    const idx = PHRASES.findIndex((p) => p.id === id);
+    const idx = phraseList.findIndex((p) => p.id === id);
     if (idx >= 0) {
-      const phrase = PHRASES[idx];
+      const phrase = phraseList[idx];
       setPhraseIdx(idx);
       setSelectedPhraseId(phrase.id);
       setText(phrase.text);
@@ -205,21 +216,21 @@ function PracticeInner() {
   const sourceList = useMemo(() => {
     const q = sourceQuery.trim().toLowerCase();
     if (q) {
-      return PHRASES.filter(
+      return phraseList.filter(
         (phrase) =>
           phrase.text.toLowerCase().includes(q) ||
           phrase.focus.toLowerCase().includes(q) ||
           CATEGORY_LABELS[phrase.category].toLowerCase().includes(q)
       ).slice(0, 10);
     }
-    return Array.from({ length: 8 }, (_, offset) => PHRASES[(phraseIdx + offset) % PHRASES.length]);
+    return Array.from({ length: 8 }, (_, offset) => phraseList[(phraseIdx + offset) % phraseList.length]);
   }, [phraseIdx, sourceQuery]);
 
   const applyPhrase = useCallback(
     (id: string) => {
-      const idx = PHRASES.findIndex((p) => p.id === id);
+      const idx = phraseList.findIndex((p) => p.id === id);
       if (idx < 0) return;
-      const phrase = PHRASES[idx];
+      const phrase = phraseList[idx];
       tap();
       setPhraseIdx(idx);
       setSelectedPhraseId(phrase.id);
@@ -233,7 +244,7 @@ function PracticeInner() {
   );
 
   const nextPhrase = useCallback(() => {
-    const next = PHRASES[(phraseIdx + 1) % PHRASES.length];
+    const next = phraseList[(phraseIdx + 1) % phraseList.length];
     applyPhrase(next.id);
   }, [applyPhrase, phraseIdx]);
 
@@ -315,6 +326,71 @@ function PracticeInner() {
     }
   }
 
+  const stopSyncedPlayback = useCallback(() => {
+    if (playbackAudioRef.current) {
+      try {
+        playbackAudioRef.current.pause();
+      } catch {}
+    }
+    playbackAudioRef.current = null;
+    setPlayback(null);
+    setPlaying(false);
+  }, []);
+
+  const playSyncedNative = useCallback(async () => {
+    if (!cleanText) return;
+    stopSyncedPlayback();
+    const prepared = await prepareNativeAudio(cleanText, accent).catch(() => null);
+    if (!prepared) {
+      await playNativeAudio(cleanText, accent);
+      return;
+    }
+    playbackAudioRef.current = prepared.audio;
+    setPlayback({ audio: prepared.audio, words: prepared.words, kind: "native" });
+    setPlaying(true);
+    const onEnd = () => {
+      setPlaying(false);
+      playbackAudioRef.current = null;
+    };
+    prepared.audio.addEventListener("ended", onEnd, { once: true });
+    prepared.audio.addEventListener("error", onEnd, { once: true });
+    try {
+      await prepared.audio.play();
+    } catch {
+      onEnd();
+    }
+  }, [accent, cleanText, stopSyncedPlayback]);
+
+  const playSyncedUser = useCallback(async () => {
+    if (!userAudioUrl) return;
+    stopSyncedPlayback();
+    if (!userAudioRef.current) userAudioRef.current = new Audio();
+    const audio = userAudioRef.current;
+    audio.src = userAudioUrl;
+    audio.currentTime = 0;
+    const words: WordTiming[] = (result?.transcript?.words ?? []).map((w) => ({
+      word: w.word,
+      start_ms: w.start_ms,
+      end_ms: w.end_ms,
+    }));
+    playbackAudioRef.current = audio;
+    setPlayback({ audio, words, kind: "user" });
+    setPlaying(true);
+    const onEnd = () => {
+      setPlaying(false);
+      playbackAudioRef.current = null;
+    };
+    audio.onended = onEnd;
+    audio.onerror = onEnd;
+    try {
+      await audio.play();
+    } catch {
+      onEnd();
+    }
+  }, [result?.transcript?.words, stopSyncedPlayback, userAudioUrl]);
+
+  useEffect(() => () => stopSyncedPlayback(), [stopSyncedPlayback]);
+
   const playTargetFromPanel = useCallback(() => playNativeAudio(cleanText, accent), [accent, cleanText]);
 
   const playUserRecording = useCallback((): Promise<void> => {
@@ -395,7 +471,7 @@ function PracticeInner() {
             )}
 
             <footer className="line-note-footer">
-              <span>{mode === "free" ? "Custom line" : `Line ${phraseIdx + 1} of ${PHRASES.length}`}</span>
+              <span>{mode === "free" ? "Custom line" : `Line ${phraseIdx + 1} of ${phraseList.length}`}</span>
               <span>{ACCENT_LABELS[accent]}</span>
             </footer>
 
@@ -440,12 +516,21 @@ function PracticeInner() {
               userAudioUrl={userAudioUrl}
               onPlayTarget={playTargetFromPanel}
               onPlayUser={playUserRecording}
+              onPlaySyncedTarget={playSyncedNative}
+              onPlaySyncedUser={playSyncedUser}
+              onStopSynced={stopSyncedPlayback}
+              playback={playback}
+              playing={playing}
               onTryAgain={() => {
                 tap();
+                stopSyncedPlayback();
                 setResult(null);
                 clearRecording();
               }}
-              onNextLine={nextPhrase}
+              onNextLine={() => {
+                stopSyncedPlayback();
+                nextPhrase();
+              }}
             />
           )}
         </div>
@@ -509,6 +594,11 @@ function Review({
   userAudioUrl,
   onPlayTarget,
   onPlayUser,
+  onPlaySyncedTarget,
+  onPlaySyncedUser,
+  onStopSynced,
+  playback,
+  playing,
   onTryAgain,
   onNextLine,
 }: {
@@ -519,6 +609,11 @@ function Review({
   userAudioUrl: string | null;
   onPlayTarget: () => Promise<void>;
   onPlayUser: () => Promise<void> | void;
+  onPlaySyncedTarget: () => Promise<void> | void;
+  onPlaySyncedUser: () => Promise<void> | void;
+  onStopSynced: () => void;
+  playback: { audio: HTMLAudioElement; words: WordTiming[]; kind: "native" | "user" } | null;
+  playing: boolean;
   onTryAgain: () => void;
   onNextLine: () => void;
 }) {
@@ -568,18 +663,51 @@ function Review({
               ))}
             </ul>
           )}
+          {playback && (
+            <div
+              style={{
+                marginTop: 16,
+                paddingTop: 14,
+                borderTop: "1px solid var(--rule)",
+                display: "grid",
+                gap: 8,
+              }}
+            >
+              <p
+                className="eyebrow"
+                style={{ color: playback.kind === "user" ? "var(--accent)" : "var(--ink-3)" }}
+              >
+                {playback.kind === "user" ? "Your take" : "Target voice"}
+              </p>
+              <SpokenText
+                words={playback.words}
+                audio={playback.audio}
+                playing={playing}
+                size="md"
+              />
+            </div>
+          )}
           <div className="review-actions">
+            <button
+              className="btn-paper press"
+              onClick={() => (playback?.kind === "native" && playing ? onStopSynced() : onPlaySyncedTarget())}
+            >
+              {playback?.kind === "native" && playing ? "Stop target" : "Play target"}
+            </button>
+            {userAudioUrl && (
+              <button
+                className="btn-paper press"
+                onClick={() => (playback?.kind === "user" && playing ? onStopSynced() : onPlaySyncedUser())}
+              >
+                {playback?.kind === "user" && playing ? "Stop your take" : "Play your take"}
+              </button>
+            )}
             <button className="btn-paper btn-primary press" onClick={onTryAgain}>
               Try same line
             </button>
             <button className="btn-paper press" onClick={onNextLine}>
               Next line
             </button>
-            {userAudioUrl && (
-              <button className="btn-paper press" onClick={() => onPlayUser()}>
-                Play your take
-              </button>
-            )}
           </div>
         </div>
       </article>

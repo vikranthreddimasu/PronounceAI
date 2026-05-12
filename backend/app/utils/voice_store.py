@@ -270,22 +270,97 @@ def delete_enrollment(user_id: str) -> bool:
 
 # ── Bundle (lazy) ─────────────────────────────────────────────────────
 
+def _take_quality_score(take: dict) -> float:
+    """
+    Rank takes by signal quality so the bundle picks the best within the 28s cap.
+
+    Components (higher = better):
+      • RMS proximity to TARGET_RMS — penalize too quiet AND too loud
+      • Peak headroom — penalize clipping risk (peak near 1.0)
+      • Duration sweet spot — 10-18s is ideal; very short or near MAX_TAKE_S loses
+      • Recency tiebreak — newest take wins ties so cleaner re-records replace old
+    """
+    rms = float(take.get("rms") or TARGET_RMS)
+    peak = float(take.get("peak") or 0.5)
+    duration = float(take.get("duration_s") or 0.0)
+    created_at = float(take.get("created_at") or 0.0)
+
+    # Distance from target RMS, scaled so 1 stop off = -0.4
+    rms_dist = abs(np.log2(max(rms, 1e-4) / TARGET_RMS))
+    rms_score = max(0.0, 1.0 - 0.4 * rms_dist)
+
+    # Peak: ideal 0.55-0.85, penalize beyond
+    if peak <= 0.0:
+        peak_score = 0.0
+    elif peak < 0.55:
+        peak_score = peak / 0.55
+    elif peak <= 0.85:
+        peak_score = 1.0
+    else:
+        peak_score = max(0.0, 1.0 - (peak - 0.85) / 0.13)
+
+    # Duration: 10-18s is ideal, taper outside
+    if duration <= 0:
+        dur_score = 0.0
+    elif 10.0 <= duration <= 18.0:
+        dur_score = 1.0
+    elif duration < 10.0:
+        dur_score = max(0.0, (duration - MIN_TAKE_S) / (10.0 - MIN_TAKE_S))
+    else:
+        dur_score = max(0.0, 1.0 - (duration - 18.0) / (MAX_TAKE_S - 18.0))
+
+    # Composite + tiny recency bonus (max 0.05 over a year)
+    base = 0.45 * rms_score + 0.30 * peak_score + 0.25 * dur_score
+    recency = min(0.05, max(0.0, (created_at - 1_700_000_000) / 1e10))
+    return float(base + recency)
+
+
 def _build_bundle(user_id: str) -> tuple[Path, str]:
-    """Concat all takes into one 24kHz mono reference clip up to BUNDLE_MAX_S."""
+    """Concat best-quality takes into one 24kHz mono reference clip up to BUNDLE_MAX_S."""
     user_dir = _user_dir(user_id)
     meta = _read_meta(user_id)
-    takes = sorted(meta.get("takes", []), key=lambda t: t.get("created_at", 0))
+    takes = list(meta.get("takes", []))
     if not takes:
         raise VoiceStoreError("No takes to bundle.")
 
-    silence = np.zeros(int(TARGET_SR * INTER_TAKE_SILENCE_MS / 1000), dtype=np.float32)
+    # Rank by quality (best first); preserve chronological order for playback.
+    ranked = sorted(takes, key=_take_quality_score, reverse=True)
+    selected: list[dict] = []
+    total_cap_samples = int(TARGET_SR * BUNDLE_MAX_S)
+    selected_samples = 0
+    silence_samples = int(TARGET_SR * INTER_TAKE_SILENCE_MS / 1000)
+
+    for t in ranked:
+        tp = user_dir / f"{t['id']}.wav"
+        if not tp.exists():
+            continue
+        # Estimate sample count from duration; if first take, no silence prefix.
+        take_samples = int((t.get("duration_s") or 0.0) * TARGET_SR)
+        gap = silence_samples if selected else 0
+        if selected_samples + gap + take_samples > total_cap_samples:
+            # Still try to fit a trimmed version if it would add meaningful length.
+            room = total_cap_samples - selected_samples - gap
+            if room < int(TARGET_SR * 1.5):
+                continue
+        selected.append(t)
+        selected_samples += gap + min(take_samples, total_cap_samples - selected_samples - gap)
+        if selected_samples >= total_cap_samples:
+            break
+
+    if not selected:
+        # Fallback: take the highest-quality one even if it exceeds duration estimate.
+        selected = [ranked[0]]
+
+    # Play back in chronological order for natural prosody continuity.
+    selected.sort(key=lambda t: t.get("created_at", 0))
+
+    silence = np.zeros(silence_samples, dtype=np.float32)
     parts: list[np.ndarray] = []
     ref_texts: list[str] = []
     used_ids: list[str] = []
-    total_cap_samples = int(TARGET_SR * BUNDLE_MAX_S)
     running = 0
 
-    for t in takes:
+    for t in selected:
         tp = user_dir / f"{t['id']}.wav"
         if not tp.exists():
             continue
@@ -295,7 +370,6 @@ def _build_bundle(user_id: str) -> tuple[Path, str]:
         if sr != TARGET_SR:
             wav = resampy.resample(wav, sr, TARGET_SR).astype(np.float32)
 
-        # Insert silence between takes (skip before the first)
         if running > 0 and running + len(silence) < total_cap_samples:
             parts.append(silence)
             running += len(silence)

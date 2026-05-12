@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Accent } from "@/lib/types";
 import {
   chooseEnrollmentPrompts,
+  deleteVoiceProfile,
   precomposeVoice,
   refreshVoiceSession,
   speakInVoice,
@@ -74,6 +75,8 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [enrollPrompts, setEnrollPrompts] = useState<EnrollmentPrompt[] | undefined>(undefined);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const voiceSession = useVoiceSession();
   const profile = voiceSession.profile;
@@ -116,6 +119,21 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
     setEnrollPrompts(chooseEnrollmentPrompts(profile));
     setEnrollOpen(true);
   }, [profile]);
+
+  const resetVoiceProfile = useCallback(async () => {
+    if (!profile?.user_id || resetting) return;
+    tap();
+    setResetting(true);
+    try {
+      clearClip();
+      await deleteVoiceProfile(profile.user_id);
+      setConfirmReset(false);
+    } catch (err) {
+      setErrorMsg((err as Error).message ?? "Could not delete voice profile.");
+    } finally {
+      setResetting(false);
+    }
+  }, [clearClip, profile?.user_id, resetting]);
 
   const onAccentChange = useCallback((a: Accent) => {
     tap();
@@ -229,11 +247,16 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
               Choose an accent, write any English text, and render it locally with your saved voice profile.
             </p>
           </div>
-          <ProfileButton
+          <ProfileActions
             status={voiceSession.status}
             ready={voiceReady}
             takes={profile?.takes.length ?? 0}
-            onClick={voiceSession.status === "error" ? () => refreshVoiceSession({ force: true }) : openEnrollment}
+            onPrimary={voiceSession.status === "error" ? () => refreshVoiceSession({ force: true }) : openEnrollment}
+            confirmReset={confirmReset}
+            resetting={resetting}
+            onAskReset={() => { tap(); setConfirmReset(true); }}
+            onConfirmReset={resetVoiceProfile}
+            onCancelReset={() => setConfirmReset(false)}
           />
         </header>
       )}
@@ -247,11 +270,16 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
             <p>{voiceReady ? "Your voice profile is ready." : "Record your voice once before generating audio."}</p>
           </div>
           {compact && (
-            <ProfileButton
+            <ProfileActions
               status={voiceSession.status}
               ready={voiceReady}
               takes={profile?.takes.length ?? 0}
-              onClick={voiceSession.status === "error" ? () => refreshVoiceSession({ force: true }) : openEnrollment}
+              onPrimary={voiceSession.status === "error" ? () => refreshVoiceSession({ force: true }) : openEnrollment}
+              confirmReset={confirmReset}
+              resetting={resetting}
+              onAskReset={() => { tap(); setConfirmReset(true); }}
+              onConfirmReset={resetVoiceProfile}
+              onCancelReset={() => setConfirmReset(false)}
             />
           )}
         </div>
@@ -373,28 +401,125 @@ export default function VoiceStudio({ initialText = "", compact = false }: Props
   );
 }
 
-function ProfileButton({
+function ProfileActions({
   status,
   ready,
   takes,
-  onClick,
+  onPrimary,
+  confirmReset,
+  resetting,
+  onAskReset,
+  onConfirmReset,
+  onCancelReset,
 }: {
   status: string;
   ready: boolean;
   takes: number;
-  onClick: () => void;
+  onPrimary: () => void;
+  confirmReset: boolean;
+  resetting: boolean;
+  onAskReset: () => void;
+  onConfirmReset: () => void;
+  onCancelReset: () => void;
 }) {
-  const label = status === "loading" ? "Checking voice" : ready ? "Update voice" : status === "error" ? "Retry voice" : "Record voice";
+  const label = status === "loading"
+    ? "Checking voice"
+    : ready
+      ? "Add another take"
+      : status === "error"
+        ? "Retry voice"
+        : "Record voice";
   return (
-    <button
-      className="voice-profile-button press"
-      onClick={onClick}
-      disabled={status === "loading"}
-      type="button"
-    >
-      <span>{label}</span>
-      <small>{ready ? `${takes} take${takes === 1 ? "" : "s"} saved` : "Local voice profile"}</small>
-    </button>
+    <div style={{ display: "grid", gap: 8, justifyItems: "stretch" }}>
+      <button
+        className="voice-profile-button press"
+        onClick={onPrimary}
+        disabled={status === "loading" || resetting}
+        type="button"
+      >
+        <span>{label}</span>
+        <small>{ready ? `${takes} take${takes === 1 ? "" : "s"} saved` : "Local voice profile"}</small>
+      </button>
+      {ready && !confirmReset && (
+        <button
+          type="button"
+          onClick={onAskReset}
+          disabled={resetting}
+          style={{
+            border: 0,
+            background: "transparent",
+            color: "var(--ink-4)",
+            cursor: "pointer",
+            padding: "4px 4px",
+            fontFamily: "var(--type-sans)",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            textAlign: "left",
+          }}
+        >
+          Delete and re-record
+        </button>
+      )}
+      {ready && confirmReset && (
+        <div style={{ display: "grid", gap: 6 }}>
+          <p
+            style={{
+              color: "var(--ink-3)",
+              fontFamily: "var(--type-mono)",
+              fontSize: 11,
+              letterSpacing: "0.04em",
+              lineHeight: 1.5,
+            }}
+          >
+            Wipe all takes and start a fresh profile?
+          </p>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              onClick={onConfirmReset}
+              disabled={resetting}
+              style={{
+                flex: 1,
+                minHeight: 34,
+                border: "1px solid var(--accent)",
+                background: "var(--accent)",
+                color: "var(--paper)",
+                fontFamily: "var(--type-sans)",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                cursor: resetting ? "wait" : "pointer",
+              }}
+            >
+              {resetting ? "Deleting" : "Yes, delete"}
+            </button>
+            <button
+              type="button"
+              onClick={onCancelReset}
+              disabled={resetting}
+              style={{
+                flex: 1,
+                minHeight: 34,
+                border: "1px solid var(--rule)",
+                background: "transparent",
+                color: "var(--ink)",
+                fontFamily: "var(--type-sans)",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
