@@ -13,24 +13,25 @@ type RailItem = {
   aliases?: string[];
 };
 
-const NOTEBOOKS: RailItem[] = [
+const PRIMARY_NAV: RailItem[] = [
+  {
+    href: "/studio",
+    label: "Voice Lab",
+    meta: "Your voice, any accent",
+    aliases: ["/studio"],
+  },
   {
     href: "/practice",
-    label: "Pronunciation notebook",
-    meta: "Current session",
+    label: "Practice",
+    meta: "Record and score",
     aliases: ["/practice"],
   },
   {
     href: "/progress",
-    label: "Learning notebook",
-    meta: "History and progress",
+    label: "Progress",
+    meta: "History and weak sounds",
     aliases: ["/progress", "/history"],
   },
-];
-
-const TOOLS: RailItem[] = [
-  { href: "/library", label: "Phrase shelf", meta: "Choose a line" },
-  { href: "/studio", label: "Voice experiment", meta: "Render your voice" },
 ];
 
 function isActive(path: string, href: string, aliases?: string[]): boolean {
@@ -51,9 +52,9 @@ export default function NavBar() {
 
   return (
     <>
-      <aside className="notebook-rail" aria-label="Notebook navigation">
+      <aside className="notebook-rail" aria-label="Main navigation">
         <Link
-          href="/practice"
+          href="/studio"
           className="rail-brand press"
           onClick={() => tap()}
           aria-label="PronounceAI session"
@@ -63,21 +64,14 @@ export default function NavBar() {
           </span>
           <span>
             <strong>PronounceAI</strong>
-            <small>Accent lab</small>
+            <small>Local AI speech lab</small>
           </span>
         </Link>
 
-        <nav className="rail-section" aria-label="Notebooks">
-          <p className="rail-kicker">Notebooks</p>
-          {NOTEBOOKS.map((item) => (
+        <nav className="rail-section" aria-label="Main">
+          <p className="rail-kicker">Main</p>
+          {PRIMARY_NAV.map((item) => (
             <RailLink key={item.href} item={item} active={isActive(path, item.href, item.aliases)} />
-          ))}
-        </nav>
-
-        <nav className="rail-section" aria-label="Tools">
-          <p className="rail-kicker">Tools</p>
-          {TOOLS.map((item) => (
-            <RailLink key={item.href} item={item} active={isActive(path, item.href)} />
           ))}
         </nav>
 
@@ -103,7 +97,7 @@ export default function NavBar() {
       <header className="mobile-nav-paper">
         <div className="mobile-nav-top">
           <Link
-            href="/practice"
+            href="/studio"
             className="press flex items-center"
             onClick={() => tap()}
             style={{ gap: 10, color: "var(--ink)", minWidth: 0 }}
@@ -128,7 +122,7 @@ export default function NavBar() {
           </Link>
         </div>
         <nav className="mobile-nav-row no-scrollbar" aria-label="Mobile navigation">
-          {[...NOTEBOOKS, ...TOOLS].map((item) => (
+          {PRIMARY_NAV.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -137,7 +131,7 @@ export default function NavBar() {
               data-active={isActive(path, item.href, item.aliases)}
               aria-current={isActive(path, item.href, item.aliases) ? "page" : undefined}
             >
-              {item.label.replace(" notebook", "").replace(" experiment", "")}
+              {item.label}
             </Link>
           ))}
         </nav>

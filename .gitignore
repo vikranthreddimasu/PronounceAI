@@ -2,6 +2,7 @@
 librispeech/*
 backend/data/
 backend/checkpoints/
+backend/cache/
 
 # Audio artifacts (recorded clips, synth outputs, model weights)
 *.wav

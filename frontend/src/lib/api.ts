@@ -4,6 +4,20 @@ import { speakReference } from "./recorder";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const FORCE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "1";
+const MAX_AUDIO_CACHE = 16;
+
+const nativeAudioCache = new Map<string, Promise<Blob>>();
+const conversionCache = new WeakMap<Blob, Map<string, Promise<Blob>>>();
+
+function remember<K, V>(map: Map<K, V>, key: K, value: V, max = MAX_AUDIO_CACHE): V {
+  if (map.has(key)) map.delete(key);
+  map.set(key, value);
+  while (map.size > max) {
+    const oldest = map.keys().next().value as K;
+    map.delete(oldest);
+  }
+  return value;
+}
 
 export function isMockMode(): boolean {
   return FORCE_MOCK || !API_URL;
@@ -52,14 +66,8 @@ export async function playNativeAudio(
     return speakReference(text);
   }
 
-  const url = `${API_URL}/api/tts?text=${encodeURIComponent(text)}&accent=${accent}&speed=${speed}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    // Graceful fallback to browser TTS if Kokoro fails
-    return speakReference(text);
-  }
-
-  const blob = await res.blob();
+  const blob = await getNativeAudio(text, accent, speed).catch(() => null);
+  if (!blob) return speakReference(text);
   const audioUrl = URL.createObjectURL(blob);
   const audio = new Audio(audioUrl);
 
@@ -67,6 +75,45 @@ export async function playNativeAudio(
     audio.onended = () => { URL.revokeObjectURL(audioUrl); resolve(); };
     audio.onerror = () => { URL.revokeObjectURL(audioUrl); resolve(); };
     audio.play().catch(() => { URL.revokeObjectURL(audioUrl); resolve(); });
+  });
+}
+
+function nativeAudioKey(text: string, accent: "GA" | "RP", speed: number): string {
+  return `${accent}:${speed.toFixed(2)}:${text.trim().slice(0, 200)}`;
+}
+
+function getNativeAudio(text: string, accent: "GA" | "RP", speed: number): Promise<Blob> {
+  const key = nativeAudioKey(text, accent, speed);
+  const cached = nativeAudioCache.get(key);
+  if (cached) return cached;
+
+  const url = `${API_URL}/api/tts?text=${encodeURIComponent(text)}&accent=${accent}&speed=${speed}`;
+  const promise = fetch(url, { cache: "force-cache" }).then((res) => {
+    if (!res.ok) throw new Error(`TTS failed (${res.status})`);
+    return res.blob();
+  }).catch((error) => {
+    nativeAudioCache.delete(key);
+    throw error;
+  });
+  return remember(nativeAudioCache, key, promise);
+}
+
+export function prefetchNativeAudio(text: string, accent: "GA" | "RP", speed: number = 0.9): void {
+  if (isMockMode() || !text.trim()) return;
+  getNativeAudio(text, accent, speed).catch(() => {
+    nativeAudioCache.delete(nativeAudioKey(text, accent, speed));
+  });
+}
+
+export function prewarmPhrase(text: string, accent: "GA" | "RP"): void {
+  if (isMockMode() || !text.trim()) return;
+  fetch(`${API_URL}/api/prewarm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phrase: text, accent }),
+    keepalive: true,
+  }).catch(() => {
+    // Best-effort only; scoring still works without the warm cache.
   });
 }
 
@@ -83,17 +130,41 @@ export async function convertAccent(
     throw new Error("Accent conversion requires the live backend (mock mode is off).");
   }
 
+  return getConvertedAccent(audioBlob, accent);
+}
+
+function getConvertedAccent(audioBlob: Blob, accent: "GA" | "RP"): Promise<Blob> {
+  let byAccent = conversionCache.get(audioBlob);
+  if (!byAccent) {
+    byAccent = new Map();
+    conversionCache.set(audioBlob, byAccent);
+  }
+  const cached = byAccent.get(accent);
+  if (cached) return cached;
+
   const form = new FormData();
   form.append("audio", audioBlob, "recording.webm");
   form.append("accent", accent);
-
-  const res = await fetch(`${API_URL}/api/accent-convert`, {
+  const promise = fetch(`${API_URL}/api/accent-convert`, {
     method: "POST",
     body: form,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const msg = await res.text().catch(() => res.statusText);
+      throw new Error(`Accent conversion failed: ${msg}`);
+    }
+    return res.blob();
+  }).catch((error) => {
+    byAccent.delete(accent);
+    throw error;
   });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => res.statusText);
-    throw new Error(`Accent conversion failed: ${msg}`);
-  }
-  return res.blob();
+  byAccent.set(accent, promise);
+  return promise;
+}
+
+export function preconvertAccent(audioBlob: Blob | null, accent: "GA" | "RP"): void {
+  if (!audioBlob || isMockMode()) return;
+  getConvertedAccent(audioBlob, accent).catch(() => {
+    conversionCache.get(audioBlob)?.delete(accent);
+  });
 }

@@ -13,13 +13,19 @@ Note: forced_align is a CPU-only operation; log_probs are computed on MPS then
 moved to CPU before alignment.
 """
 import logging
+import os
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torchaudio
 from transformers import AutoProcessor, AutoModelForCTC
+
+from app.utils.text_metrics import edit_distance
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,7 @@ GOP_YELLOW = -2.0    # -1.0 to -2.0 → marginal (yellow)
                      # < -2.0  → incorrect (red)
 
 FRAME_DURATION_MS = 20   # wav2vec2 outputs ~50 frames/sec
+PHRASE_CACHE_SIZE = int(os.getenv("PHONEME_PHRASE_CACHE_SIZE", "2048"))
 
 
 @dataclass
@@ -71,6 +78,9 @@ class PhonemeEngine:
         self.processor = AutoProcessor.from_pretrained(model_id)
         self.model = AutoModelForCTC.from_pretrained(model_id).to(self.device)
         self.model.eval()
+        self._lock = threading.RLock()
+        self._phrase_cache_lock = threading.RLock()
+        self._phrase_token_cache: OrderedDict[str, tuple[int, ...]] = OrderedDict()
 
         vocab = self.processor.tokenizer.get_vocab()
         self.vocab = vocab
@@ -93,24 +103,39 @@ class PhonemeEngine:
         else:
             logger.info("No regression head — raw GOP scores used")
 
-    @torch.no_grad()
-    def score(self, wav: torch.Tensor, phrase: str) -> list[PhonemeResult]:
-        """wav: [1, T] float32 at 16 kHz. Returns one PhonemeResult per phoneme."""
-        wav = wav.to(self.device)
-        inputs = self.processor(
-            wav.squeeze(0).cpu().numpy(),
-            sampling_rate=16000,
-            return_tensors="pt",
-            padding=True,
-        )
-        logits = self.model(inputs.input_values.to(self.device)).logits  # [1, T, vocab]
-        log_probs_dev = torch.log_softmax(logits, dim=-1)                # [1, T, vocab] on device
-        log_probs_cpu = log_probs_dev.cpu()                              # forced_align needs CPU
+    @torch.inference_mode()
+    def score(
+        self,
+        wav: torch.Tensor,
+        phrase: str,
+        include_diagnostics: bool = False,
+    ) -> list[PhonemeResult] | tuple[list[PhonemeResult], dict]:
+        """wav: [1, T] float32 at 16 kHz. Returns one result per expected phoneme."""
+        with self._lock:
+            wav = wav.to(self.device)
+            inputs = self.processor(
+                wav.squeeze(0).cpu().numpy(),
+                sampling_rate=16000,
+                return_tensors="pt",
+                padding=True,
+            )
+            logits = self.model(inputs.input_values.to(self.device)).logits  # [1, T, vocab]
+            log_probs_dev = torch.log_softmax(logits, dim=-1)                # [1, T, vocab]
+            log_probs_cpu = log_probs_dev.cpu()                              # forced_align needs CPU
 
-        expected_tokens = self._text_to_token_ids(phrase)
+        expected_tokens = self.prepare_phrase(phrase)
         if not expected_tokens:
             logger.warning("Could not convert phrase to phoneme token IDs")
-            return []
+            empty_diag = {
+                "expected_phone_count": 0,
+                "predicted_phone_count": 0,
+                "phone_error_rate": None,
+                "ctc_sequence_score": None,
+                "predicted_phones": [],
+            }
+            return ([], empty_diag) if include_diagnostics else []
+
+        diagnostics = self._ctc_diagnostics(log_probs_cpu[0], expected_tokens)
 
         try:
             targets = torch.tensor([expected_tokens], dtype=torch.int32)
@@ -134,7 +159,7 @@ class PhonemeEngine:
                 log_probs_cpu[0], start_f, end_f,
             ))
 
-        return results
+        return (results, diagnostics) if include_diagnostics else results
 
     def _make_result(
         self,
@@ -232,7 +257,76 @@ class PhonemeEngine:
         fpb = max(1, n_frames // n)
         return [(i * fpb, min((i + 1) * fpb - 1, n_frames - 1)) for i in range(n)]
 
-    def _text_to_token_ids(self, text: str) -> list[int]:
+    def _is_phone_token(self, token_id: int) -> bool:
+        token = self.id_to_token.get(token_id, "")
+        return token not in ("<pad>", "|", "<unk>", "", "<s>", "</s>")
+
+    def _collapse_ctc_ids(self, frame_ids: list[int]) -> list[int]:
+        """Greedy CTC collapse: remove repeats and blanks/special tokens."""
+        collapsed: list[int] = []
+        prev: int | None = None
+        for token_id in frame_ids:
+            if token_id == prev:
+                continue
+            prev = token_id
+            if self._is_phone_token(token_id):
+                collapsed.append(token_id)
+        return collapsed
+
+    def _ctc_diagnostics(self, log_probs: torch.Tensor, expected_ids: list[int]) -> dict:
+        """
+        Alignment-independent CTC sanity check.
+
+        Forced alignment is good for timestamps, but it can hide insertions or
+        deletions because it must align the expected phone string. A greedy CTC
+        transcript gives us a cheap second opinion without another model pass.
+        """
+        pred_ids = self._collapse_ctc_ids(log_probs.argmax(dim=-1).tolist())
+        if not expected_ids:
+            per = None
+            seq_score = None
+        else:
+            distance = edit_distance(pred_ids, expected_ids)
+            per = round(distance / len(expected_ids), 3)
+            seq_score = round(max(0.0, 100.0 * (1.0 - min(1.0, per))), 1)
+        return {
+            "expected_phone_count": len(expected_ids),
+            "predicted_phone_count": len(pred_ids),
+            "phone_error_rate": per,
+            "ctc_sequence_score": seq_score,
+            "predicted_phones": self._token_ids_to_strings(pred_ids[:80]),
+        }
+
+    def prepare_phrase(self, text: str) -> list[int]:
+        """Precompute/cache the target phone IDs for a phrase.
+
+        G2P startup is surprisingly noticeable on first score. Keeping this
+        tiny cache hot lets the UI prewarm a phrase as soon as the user selects
+        it, before they press record.
+        """
+        key = " ".join(text.split())[:200].lower()
+        with self._phrase_cache_lock:
+            cached = self._phrase_token_cache.get(key)
+            if cached is not None:
+                self._phrase_token_cache.move_to_end(key)
+                return list(cached)
+
+        ids = self._text_to_token_ids_uncached(text)
+        with self._phrase_cache_lock:
+            self._phrase_token_cache[key] = tuple(ids)
+            self._phrase_token_cache.move_to_end(key)
+            while len(self._phrase_token_cache) > PHRASE_CACHE_SIZE:
+                self._phrase_token_cache.popitem(last=False)
+        return ids
+
+    def warmup(self, phrase: str = "Ship or sheep?") -> None:
+        """Run one cheap forward pass so MPS/transformer kernels are hot."""
+        self.prepare_phrase(phrase)
+        t = np.arange(16_000, dtype=np.float32) / 16_000
+        wav = torch.from_numpy(0.02 * np.sin(2 * np.pi * 220 * t)).unsqueeze(0)
+        self.score(wav, phrase, include_diagnostics=True)
+
+    def _text_to_token_ids_uncached(self, text: str) -> list[int]:
         """
         Convert English text → ARPAbet phones → model vocab IDs.
         Uses g2p-en (CMU dict + neural fallback) which outputs ARPAbet directly,

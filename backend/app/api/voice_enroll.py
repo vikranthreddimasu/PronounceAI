@@ -7,7 +7,8 @@ POST /api/voice/enroll
   Appends a new take to the user. Bundle is rebuilt lazily on next read.
 
 GET  /api/voice/{user_id}
-  -> { user_id, takes: [...], duration_s, bundle_duration_s, created_at }
+  -> { user_id, takes: [...], duration_s, bundle_duration_s,
+       created_at, updated_at, revision }
   or 404.
 
 DELETE /api/voice/{user_id}
@@ -17,7 +18,7 @@ DELETE /api/voice/{user_id}/takes/{take_id}
   -> { deleted: bool, remaining: int }
 
 POST /api/voice/speak
-  multipart: user_id (str), text (str), accent (str)
+  multipart: user_id (str), text (str), accent (str), strategy (str?)
   -> audio/wav  — `text` synthesised in the enrolled voice + target accent.
                   Response header `X-Word-Timings` carries a base64-encoded
                   JSON array of `{word, start_ms, end_ms}` for live highlight.
@@ -122,6 +123,7 @@ async def speak(
     user_id: str = Form(...),
     text: str = Form(...),
     accent: str = Form("GA"),
+    strategy: str = Form("target_accent"),
 ):
     accent = accent.upper()
     text = (text or "").strip()
@@ -154,34 +156,41 @@ async def speak(
 
     t0 = time.perf_counter()
     try:
-        out_path, words = voice_clone.speak(
+        result = voice_clone.speak(
             text=text,
             ref_audio_path=info["ref_path"],
             accent=accent,
+            ref_text=info.get("ref_text", ""),
+            strategy=strategy,
         )
     except Exception as e:
         logger.exception(f"Speak synthesis failed: {e}")
         raise HTTPException(status_code=500, detail="Voice synthesis failed.")
     elapsed = round((time.perf_counter() - t0) * 1000)
     logger.info(
-        f"voice/speak {user_id[:6]}… → {accent} | '{text[:40]}…' | {elapsed}ms "
+        f"voice/speak {user_id[:6]}… → {accent} ({result.strategy}/{result.mode}) "
+        f"| '{text[:40]}…' | {elapsed}ms "
         f"(ref bundle {info.get('bundle_duration_s', 0):.1f}s, "
-        f"{len(info.get('takes', []))} takes, {len(words)} words)"
+        f"{len(info.get('takes', []))} takes, {len(result.words)} words)"
     )
 
     # Pack word timings into a single header. Base64 keeps the value
     # header-safe and compact for the typical 50–80 word outputs.
     words_b64 = base64.b64encode(
-        json.dumps(words, separators=(",", ":")).encode("utf-8")
+        json.dumps(result.words, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
 
     return FileResponse(
-        path=str(out_path),
+        path=str(result.path),
         media_type="audio/wav",
         headers={
             "X-Target-Text": text[:200],
             "X-Accent": accent,
+            "X-Voice-Strategy": result.strategy,
+            "X-Voice-Mode": result.mode,
             "X-Word-Timings": words_b64,
-            "Access-Control-Expose-Headers": "X-Target-Text, X-Accent, X-Word-Timings",
+            "Access-Control-Expose-Headers": (
+                "X-Target-Text, X-Accent, X-Voice-Strategy, X-Voice-Mode, X-Word-Timings"
+            ),
         },
     )

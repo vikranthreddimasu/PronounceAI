@@ -11,14 +11,14 @@ import {
 } from "@/lib/store";
 import { isSoundsEnabled, setSoundsEnabled, tap, confirm } from "@/lib/sounds";
 import {
-  fetchVoiceProfile,
-  getOrCreateVoiceId,
+  deleteCurrentVoiceProfile,
   deleteVoiceProfile,
   deleteVoiceTake,
-  ENROLLMENT_PROMPTS,
+  chooseEnrollmentPrompts,
+  refreshVoiceSession,
   type EnrollmentPrompt,
-  type VoiceProfile,
 } from "@/lib/voiceProfile";
+import { useVoiceSession } from "@/lib/useVoiceSession";
 import EnrollmentModal from "@/components/EnrollmentModal";
 import type { Accent } from "@/lib/types";
 
@@ -37,18 +37,15 @@ const ACCENT_OPTIONS: { id: Accent; label: string; desc: string }[] = [
 export default function SettingsPage() {
   const [profile, setLocal] = useState<UserProfile>(getProfile());
   const [sounds, setSounds] = useState(true);
-  const [voiceProfile, setVoice] = useState<VoiceProfile | null>(null);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [enrollPrompts, setEnrollPrompts] = useState<EnrollmentPrompt[] | undefined>(undefined);
   const [confirmReset, setConfirmReset] = useState(false);
+  const voiceSession = useVoiceSession();
+  const voiceProfile = voiceSession.profile;
 
   useEffect(() => {
     setLocal(getProfile());
     setSounds(isSoundsEnabled());
-    const id = getOrCreateVoiceId();
-    if (id) {
-      fetchVoiceProfile(id).then(setVoice).catch(() => setVoice(null));
-    }
     return subscribeStorage(() => setLocal(getProfile()));
   }, []);
 
@@ -153,9 +150,31 @@ export default function SettingsPage() {
       {/* Voice enrollment */}
       <Group
         title="Voice profile"
-        hint="Each take strengthens the speaker embedding. CosyVoice uses up to 28s of reference; more variety + length = harder to distinguish from real you."
+        hint="A short clean sample is enough to start. Add another take only when you want a stronger profile."
       >
-        {voiceProfile ? (
+        {voiceSession.status === "loading" ? (
+          <div className="flex flex-col" style={{ gap: 10 }}>
+            <p style={{ fontSize: 13, color: "var(--ink-2)" }}>
+              Checking the local backend for your saved voice profile...
+            </p>
+          </div>
+        ) : voiceSession.status === "error" ? (
+          <div className="flex flex-col" style={{ gap: 12 }}>
+            <p style={{ fontSize: 13, color: "var(--rose)" }}>
+              {voiceSession.error ?? "Could not check the voice profile."}
+            </p>
+            <button
+              className="btn-paper press"
+              onClick={() => {
+                tap();
+                refreshVoiceSession({ force: true }).catch(() => {});
+              }}
+              style={{ fontSize: 12 }}
+            >
+              Check again
+            </button>
+          </div>
+        ) : voiceProfile ? (
           <div className="flex flex-col" style={{ gap: 14 }}>
             <div className="flex items-end justify-between" style={{ gap: 12 }}>
               <div>
@@ -214,10 +233,10 @@ export default function SettingsPage() {
                     className="press"
                     onClick={async () => {
                       tap();
-                      const id = getOrCreateVoiceId();
+                      const id = voiceSession.userId;
+                      if (!id) return;
                       try {
-                        const next = await deleteVoiceTake(id, t.id);
-                        setVoice(next);
+                        await deleteVoiceTake(id, t.id);
                       } catch {
                         /* surface as toast later */
                       }
@@ -246,10 +265,7 @@ export default function SettingsPage() {
                 className="btn-paper btn-primary press"
                 onClick={() => {
                   tap();
-                  // Default: cycle through the next missing prompt(s)
-                  const usedTexts = new Set(voiceProfile.takes.map((t) => t.ref_text));
-                  const missing = ENROLLMENT_PROMPTS.filter((p) => !usedTexts.has(p.text));
-                  setEnrollPrompts(missing.length > 0 ? missing : ENROLLMENT_PROMPTS);
+                  setEnrollPrompts(chooseEnrollmentPrompts(voiceProfile));
                   setEnrollOpen(true);
                 }}
                 style={{ fontSize: 12 }}
@@ -260,9 +276,7 @@ export default function SettingsPage() {
                 className="btn-paper press"
                 onClick={async () => {
                   tap();
-                  const id = getOrCreateVoiceId();
-                  await deleteVoiceProfile(id);
-                  setVoice(null);
+                  if (voiceSession.userId) await deleteVoiceProfile(voiceSession.userId);
                 }}
                 style={{ fontSize: 12, color: "var(--rose)" }}
               >
@@ -273,7 +287,7 @@ export default function SettingsPage() {
         ) : (
           <div className="flex flex-col" style={{ gap: 12 }}>
             <p style={{ fontSize: 13, color: "var(--ink-2)" }}>
-              Not enrolled yet. 3 short takes (~30s total).
+              Not enrolled yet. Record one short clean sample.
             </p>
             <button
               className="btn-paper btn-primary press"
@@ -380,7 +394,8 @@ export default function SettingsPage() {
             </button>
             <button
               className="btn-paper press"
-              onClick={() => {
+              onClick={async () => {
+                await deleteCurrentVoiceProfile().catch(() => {});
                 resetAll();
                 confirm();
                 setLocal(getProfile());
@@ -393,7 +408,7 @@ export default function SettingsPage() {
                 borderColor: "var(--rose)",
               }}
             >
-              Yes, wipe profile + sessions
+              Yes, wipe profile, voice + sessions
             </button>
           </div>
         )}
@@ -405,7 +420,7 @@ export default function SettingsPage() {
           setEnrollOpen(false);
           setEnrollPrompts(undefined);
         }}
-        onEnrolled={(p) => setVoice(p)}
+        onEnrolled={() => {}}
         prompts={enrollPrompts}
       />
     </main>

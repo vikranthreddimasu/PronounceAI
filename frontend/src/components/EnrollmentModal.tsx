@@ -15,17 +15,14 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onEnrolled: (profile: VoiceProfile) => void;
-  /**
-   * Prompts to record. Defaults to all 3 ENROLLMENT_PROMPTS for first-time
-   * enrollment. Pass a single prompt for "add one more take" flow.
-   */
+  /** Prompts to record. Defaults to one clean CosyVoice reference prompt. */
   prompts?: EnrollmentPrompt[];
 };
 
 type Step = "intro" | "recording" | "uploading" | "between" | "done" | "error";
 
-const MIN_DURATION_S = 5;
-const MAX_DURATION_S = 22;
+const MIN_DURATION_S = 3;
+const MAX_DURATION_S = 18;
 
 export default function EnrollmentModal({
   open,
@@ -42,14 +39,22 @@ export default function EnrollmentModal({
   const recorderRef = useRef<Recorder | null>(null);
   const startRef = useRef<number>(0);
   const rafRef = useRef<number>(0);
+  const closeTimerRef = useRef<number | null>(null);
+  const stoppingRef = useRef(false);
+  const stopAndUploadRef = useRef<() => void>(() => {});
 
   useEffect(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
     if (open) {
       setIdx(0);
       setStep("intro");
       setErrorMsg(null);
       setElapsed(0);
       setProfile(null);
+      stoppingRef.current = false;
     } else {
       recorderRef.current?.dispose();
       recorderRef.current = null;
@@ -57,7 +62,29 @@ export default function EnrollmentModal({
     }
   }, [open]);
 
-  useEffect(() => () => recorderRef.current?.dispose(), []);
+  useEffect(
+    () => () => {
+      recorderRef.current?.dispose();
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    },
+    []
+  );
+
+  const scheduleClose = useCallback(
+    (delayMs: number) => {
+      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = window.setTimeout(() => {
+        closeTimerRef.current = null;
+        onClose();
+      }, delayMs);
+    },
+    [onClose]
+  );
+
+  const requestClose = useCallback(() => {
+    if (step === "recording" || step === "uploading") return;
+    onClose();
+  }, [onClose, step]);
 
   const startRecord = useCallback(async () => {
     setErrorMsg(null);
@@ -72,7 +99,7 @@ export default function EnrollmentModal({
         setElapsed(e);
         if (e >= MAX_DURATION_S) {
           // Auto-stop if user goes too long
-          stopAndUpload();
+          stopAndUploadRef.current();
           return;
         }
         rafRef.current = requestAnimationFrame(tick);
@@ -83,11 +110,11 @@ export default function EnrollmentModal({
       setErrorMsg((e as Error).message ?? "Couldn't access microphone.");
       setStep("error");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const stopAndUpload = useCallback(async () => {
-    if (!recorderRef.current) return;
+    if (!recorderRef.current || stoppingRef.current) return;
+    stoppingRef.current = true;
     cancelAnimationFrame(rafRef.current);
     release();
     setStep("uploading");
@@ -101,15 +128,21 @@ export default function EnrollmentModal({
       confirm();
       if (idx + 1 >= prompts.length) {
         setStep("done");
-        setTimeout(() => onClose(), 1100);
+        scheduleClose(1100);
       } else {
         setStep("between");
       }
     } catch (e) {
       setErrorMsg((e as Error).message ?? "Upload failed.");
       setStep("error");
+    } finally {
+      stoppingRef.current = false;
     }
-  }, [idx, prompts, onClose, onEnrolled]);
+  }, [idx, prompts, onEnrolled, scheduleClose]);
+
+  useEffect(() => {
+    stopAndUploadRef.current = stopAndUpload;
+  }, [stopAndUpload]);
 
   const nextPrompt = useCallback(() => {
     tap();
@@ -122,20 +155,21 @@ export default function EnrollmentModal({
   const saveNow = useCallback(() => {
     tap();
     setStep("done");
-    setTimeout(() => onClose(), 600);
-  }, [onClose]);
+    scheduleClose(600);
+  }, [scheduleClose]);
 
   if (!open) return null;
 
   const current = prompts[idx];
   const lastTake = profile?.takes?.[profile.takes.length - 1];
+  const isSinglePrompt = prompts.length === 1;
 
   return (
     <div
       role="dialog"
       aria-modal="true"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) requestClose();
       }}
       style={{
         position: "fixed",
@@ -173,7 +207,7 @@ export default function EnrollmentModal({
                 fontWeight: 600,
               }}
             >
-              Voice profile · take {idx + 1} of {prompts.length}
+              {isSinglePrompt ? "Voice profile" : `Voice profile · take ${idx + 1} of ${prompts.length}`}
             </p>
             <h2
               className="font-display"
@@ -190,7 +224,8 @@ export default function EnrollmentModal({
           </div>
           <button
             className="press"
-            onClick={onClose}
+            onClick={requestClose}
+            disabled={step === "recording" || step === "uploading"}
             aria-label="Close"
             style={{
               width: 30,
@@ -204,27 +239,30 @@ export default function EnrollmentModal({
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
+              opacity: step === "recording" || step === "uploading" ? 0.45 : 1,
+              cursor: step === "recording" || step === "uploading" ? "not-allowed" : "pointer",
             }}
           >
             <CloseIcon />
           </button>
         </div>
 
-        {/* Progress dots */}
-        <div className="flex" style={{ gap: 6, marginBottom: 18 }}>
-          {prompts.map((p, i) => (
-            <div
-              key={p.id}
-              style={{
-                flex: 1,
-                height: 4,
-                borderRadius: 9999,
-                background: i < idx ? "var(--jade)" : i === idx ? "var(--accent)" : "var(--paper-3)",
-                transition: "background 240ms var(--ease-paper)",
-              }}
-            />
-          ))}
-        </div>
+        {!isSinglePrompt && (
+          <div className="flex" style={{ gap: 6, marginBottom: 18 }}>
+            {prompts.map((p, i) => (
+              <div
+                key={p.id}
+                style={{
+                  flex: 1,
+                  height: 4,
+                  borderRadius: 9999,
+                  background: i < idx ? "var(--jade)" : i === idx ? "var(--accent)" : "var(--paper-3)",
+                  transition: "background 240ms var(--ease-paper)",
+                }}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Phrase card */}
         <div
@@ -234,8 +272,8 @@ export default function EnrollmentModal({
           <p
             className="font-display"
             style={{
-              fontSize: 17,
-              fontWeight: 500,
+              fontSize: 18,
+              fontWeight: 560,
               color: "var(--ink)",
               lineHeight: 1.45,
               letterSpacing: 0,
@@ -261,14 +299,14 @@ export default function EnrollmentModal({
         {step === "intro" && (
           <>
             <p style={{ fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.55, marginBottom: 16 }}>
-              Read it once, naturally. Stays in your browser and on your machine.
+              Read it once in a quiet room. The exact text is saved with the audio so the local model can clone your voice reliably.
             </p>
             <button
               className="btn-paper btn-primary press"
               onClick={startRecord}
               style={{ width: "100%", padding: "13px 0", fontSize: 14 }}
             >
-              Start recording
+              Record voice sample
             </button>
             {idx > 0 && (
               <button
@@ -317,7 +355,7 @@ export default function EnrollmentModal({
             >
               {elapsed < MIN_DURATION_S
                 ? `Read for ${(MIN_DURATION_S - elapsed).toFixed(1)}s more`
-                : "Save take"}
+                : "Save voice sample"}
             </button>
           </div>
         )}
@@ -335,7 +373,7 @@ export default function EnrollmentModal({
                 display: "block",
               }}
             />
-            <p style={{ fontSize: 12, color: "var(--ink-3)" }}>Saving take {idx + 1}...</p>
+            <p style={{ fontSize: 12, color: "var(--ink-3)" }}>Saving voice sample...</p>
           </div>
         )}
 
@@ -406,7 +444,7 @@ export default function EnrollmentModal({
               className="font-display"
               style={{ fontSize: 16, color: "var(--ink)", fontWeight: 700, letterSpacing: 0 }}
             >
-              Voice profile saved
+              Voice ready
             </p>
             {profile && (
               <p className="font-mono" style={{ fontSize: 11, color: "var(--ink-4)", letterSpacing: 0 }}>
@@ -438,6 +476,7 @@ export default function EnrollmentModal({
               className="btn-paper press"
               onClick={() => {
                 tap();
+                stoppingRef.current = false;
                 setStep("intro");
                 setElapsed(0);
                 setErrorMsg(null);

@@ -10,40 +10,64 @@ Used in the scoring pipeline to:
 """
 import logging
 import os
+import threading
 
 import numpy as np
 
+from app.utils.text_metrics import word_error_rate
+
 logger = logging.getLogger(__name__)
 
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
+WHISPER_FALLBACK_MODEL = os.getenv("WHISPER_FALLBACK_MODEL", "large-v3")
 WHISPER_DEVICE = "cpu"   # faster-whisper uses CTranslate2; MPS not yet supported
 WHISPER_COMPUTE = "int8" # int8 quantisation — fast on M5 Pro CPU, ~1GB RAM
+WHISPER_CPU_THREADS = int(os.getenv("WHISPER_CPU_THREADS", "0"))
 
 
 class WhisperEngine:
     def __init__(self, model_size: str = WHISPER_MODEL):
-        logger.info(f"Loading Whisper {model_size} (CTranslate2 int8, CPU)")
         from faster_whisper import WhisperModel
-        self.model = WhisperModel(
-            model_size,
-            device=WHISPER_DEVICE,
-            compute_type=WHISPER_COMPUTE,
-        )
-        logger.info("Whisper ready")
+        self._lock = threading.RLock()
+        try:
+            logger.info(f"Loading Whisper {model_size} (CTranslate2 int8, CPU)")
+            self.model = WhisperModel(
+                model_size,
+                device=WHISPER_DEVICE,
+                compute_type=WHISPER_COMPUTE,
+                cpu_threads=WHISPER_CPU_THREADS,
+            )
+            self.model_size = model_size
+        except Exception as e:
+            if model_size == WHISPER_FALLBACK_MODEL:
+                raise
+            logger.warning(
+                f"Whisper {model_size} unavailable ({e}); falling back to {WHISPER_FALLBACK_MODEL}"
+            )
+            self.model = WhisperModel(
+                WHISPER_FALLBACK_MODEL,
+                device=WHISPER_DEVICE,
+                compute_type=WHISPER_COMPUTE,
+                cpu_threads=WHISPER_CPU_THREADS,
+            )
+            self.model_size = WHISPER_FALLBACK_MODEL
+        logger.info(f"Whisper ready ({self.model_size})")
 
     def transcribe(self, wav_np: np.ndarray, sr: int = 16000) -> dict:
         """
         Transcribe audio → {text, words, wer_vs_expected (None until phrase given)}.
         wav_np: float32 array at 16 kHz.
         """
-        segments, info = self.model.transcribe(
-            wav_np,
-            language="en",
-            word_timestamps=True,
-            vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 300},
-        )
-        return self._collect(segments, info, with_words=True)
+        with self._lock:
+            segments, info = self.model.transcribe(
+                wav_np,
+                language="en",
+                task="transcribe",
+                word_timestamps=True,
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 300},
+            )
+            return self._collect(segments, info, with_words=True)
 
     def transcribe_fast(self, wav_np: np.ndarray) -> str:
         """Lightweight transcription used for output validation.
@@ -52,17 +76,19 @@ class WhisperEngine:
         the full `transcribe()` because we don't need word-level alignment —
         we only need a text string to compare against an expected reference.
         """
-        segments, _ = self.model.transcribe(
-            wav_np,
-            language="en",
-            word_timestamps=False,
-            vad_filter=False,
-            beam_size=1,
-            best_of=1,
-            temperature=0.0,
-            condition_on_previous_text=False,
-        )
-        return "".join(seg.text for seg in segments).strip()
+        with self._lock:
+            segments, _ = self.model.transcribe(
+                wav_np,
+                language="en",
+                task="transcribe",
+                word_timestamps=False,
+                vad_filter=False,
+                beam_size=1,
+                best_of=1,
+                temperature=0.0,
+                condition_on_previous_text=False,
+            )
+            return "".join(seg.text for seg in segments).strip()
 
     def transcribe_with_words(self, wav_np: np.ndarray) -> dict:
         """Greedy decode WITH word timestamps. Used by /api/voice/speak so the
@@ -72,28 +98,34 @@ class WhisperEngine:
         emits per-word start/end times. Same single STT pass also serves as
         the instruct-mode validation transcript.
         """
-        segments, _ = self.model.transcribe(
-            wav_np,
-            language="en",
-            word_timestamps=True,
-            vad_filter=False,
-            beam_size=1,
-            best_of=1,
-            temperature=0.0,
-            condition_on_previous_text=False,
-        )
-        words = []
-        text = ""
-        for seg in segments:
-            text += seg.text
-            if seg.words:
-                for w in seg.words:
-                    words.append({
-                        "word": w.word,
-                        "start_ms": round(w.start * 1000),
-                        "end_ms": round(w.end * 1000),
-                    })
-        return {"text": text.strip(), "words": words}
+        with self._lock:
+            segments, _ = self.model.transcribe(
+                wav_np,
+                language="en",
+                task="transcribe",
+                word_timestamps=True,
+                vad_filter=False,
+                beam_size=1,
+                best_of=1,
+                temperature=0.0,
+                condition_on_previous_text=False,
+            )
+            words = []
+            text = ""
+            for seg in segments:
+                text += seg.text
+                if seg.words:
+                    for w in seg.words:
+                        words.append({
+                            "word": w.word,
+                            "start_ms": round(w.start * 1000),
+                            "end_ms": round(w.end * 1000),
+                        })
+            return {"text": text.strip(), "words": words}
+
+    def warmup(self) -> None:
+        """Run a tiny greedy decode so CTranslate2 has initialized workers."""
+        self.transcribe_fast(np.zeros(16_000, dtype=np.float32))
 
     def _collect(self, segments, info, *, with_words: bool) -> dict:
         words = []
@@ -115,23 +147,7 @@ class WhisperEngine:
             "language_probability": round(info.language_probability, 3),
         }
 
-    def word_error_rate(self, hypothesis: str, reference: str) -> float:
-        """Simple WER: edit distance on word tokens."""
-        hyp = hypothesis.lower().split()
-        ref = reference.lower().split()
-        if not ref:
-            return 0.0
-        # Dynamic programming edit distance
-        d = list(range(len(hyp) + 1))
-        for r_word in ref:
-            prev = d[0]
-            d[0] += 1
-            for i, h_word in enumerate(hyp):
-                cur = d[i + 1]
-                d[i + 1] = min(
-                    d[i] + 1,        # insertion
-                    cur + 1,         # deletion
-                    prev + (0 if h_word == r_word else 1),  # substitution
-                )
-                prev = cur
-        return round(d[len(hyp)] / len(ref), 3)
+    @staticmethod
+    def word_error_rate(hypothesis: str, reference: str) -> float:
+        """Normalized WER with punctuation/case stripped."""
+        return word_error_rate(hypothesis, reference)

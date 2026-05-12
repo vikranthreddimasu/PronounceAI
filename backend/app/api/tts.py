@@ -11,6 +11,7 @@ hits zero latency after the first synthesis.
 """
 import io
 import logging
+import threading
 from functools import lru_cache
 
 import numpy as np
@@ -31,6 +32,8 @@ VOICE_MAP = {
 }
 
 SAMPLE_RATE = 24000   # Kokoro native output rate
+_PIPELINE_LOCK = threading.RLock()
+_AUDIO_CACHE_LOCK = threading.RLock()
 
 
 def _synthesize(text: str, lang_code: str, voice: str, speed: float) -> bytes:
@@ -49,11 +52,16 @@ def _synthesize(text: str, lang_code: str, voice: str, speed: float) -> bytes:
 
 
 @lru_cache(maxsize=2)
-def _get_pipeline(lang_code: str):
+def _get_pipeline_cached(lang_code: str):
     """Cached pipeline — one per language code (a=American, b=British)."""
     from kokoro import KPipeline
     logger.info(f"Loading Kokoro pipeline lang_code={lang_code}")
     return KPipeline(lang_code=lang_code)
+
+
+def _get_pipeline(lang_code: str):
+    with _PIPELINE_LOCK:
+        return _get_pipeline_cached(lang_code)
 
 
 # In-memory audio cache: (text, accent, speed) → wav bytes
@@ -75,8 +83,10 @@ async def tts(
         speed = 0.9
 
     cache_key = (text[:200], accent, round(speed, 2))
-    if cache_key in _audio_cache:
-        return Response(content=_audio_cache[cache_key], media_type="audio/wav")
+    with _AUDIO_CACHE_LOCK:
+        cached = _audio_cache.get(cache_key)
+    if cached is not None:
+        return Response(content=cached, media_type="audio/wav")
 
     lang_code, voice = VOICE_MAP[accent]
     try:
@@ -85,9 +95,10 @@ async def tts(
         logger.error(f"TTS synthesis failed: {e}")
         raise HTTPException(status_code=500, detail="TTS synthesis failed")
 
-    if len(_audio_cache) >= _MAX_CACHE:
-        _audio_cache.pop(next(iter(_audio_cache)))
-    _audio_cache[cache_key] = wav_bytes
+    with _AUDIO_CACHE_LOCK:
+        if len(_audio_cache) >= _MAX_CACHE:
+            _audio_cache.pop(next(iter(_audio_cache)))
+        _audio_cache[cache_key] = wav_bytes
 
     return Response(
         content=wav_bytes,

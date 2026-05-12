@@ -55,6 +55,16 @@ class AccentDistanceEngine:
             return None
 
         emb = self.embed(wav_np)
+        return self.distance_score_from_embedding(emb, target_accent)
+
+    def has_centroid(self, target_accent: str) -> bool:
+        return target_accent in self.centroids
+
+    def distance_score_from_embedding(self, emb: torch.Tensor, target_accent: str) -> float | None:
+        centroid = self.centroids.get(target_accent)
+        if centroid is None:
+            return None
+        emb = emb.to(self.device)
         cos_sim = torch.nn.functional.cosine_similarity(
             emb.unsqueeze(0), centroid.unsqueeze(0)
         ).item()
@@ -71,3 +81,6 @@ class AccentDistanceEngine:
     def save_centroids(self, path: str) -> None:
         torch.save(self.centroids, path)
         logger.info(f"Saved centroids to {path}: {list(self.centroids.keys())}")
+
+    def warmup(self) -> None:
+        self.embed(np.zeros(16_000, dtype=np.float32))

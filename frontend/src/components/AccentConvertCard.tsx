@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Accent } from "@/lib/types";
 import { convertAccent } from "@/lib/api";
-import { cloneAccent, type VoiceProfile } from "@/lib/voiceProfile";
+import { cloneAccent, speakInVoice, type VoiceProfile } from "@/lib/voiceProfile";
 
 type Mode = "native" | "personal";
 
@@ -12,6 +12,8 @@ type Props = {
   accent: Accent;
   /** Profile loaded from /api/voice/<id>. Null when no enrollment. */
   voiceProfile: VoiceProfile | null;
+  /** Known target phrase; lets personal mode skip ASR and hit speculative voice cache. */
+  overrideText?: string;
   /** Triggered when the user wants to (re-)enroll. */
   onOpenEnrollment: () => void;
 };
@@ -28,7 +30,7 @@ const MODE_DESC: Record<Mode, { title: string; sub: string }> = {
   },
   personal: {
     title: "Your voice",
-    sub: "Words rendered in your own voice, with the target accent.",
+    sub: "Your timbre with the target accent locked in.",
   },
 };
 
@@ -36,6 +38,7 @@ export default function AccentConvertCard({
   userAudio,
   accent,
   voiceProfile,
+  overrideText,
   onOpenEnrollment,
 }: Props) {
   const [mode, setMode] = useState<Mode>(voiceProfile ? "personal" : "native");
@@ -75,7 +78,17 @@ export default function AccentConvertCard({
       let blob: Blob;
       if (mode === "personal") {
         if (!voiceProfile) throw new Error("Set up your voice first.");
-        blob = await cloneAccent(userAudio, accent, voiceProfile.user_id);
+        if (overrideText?.trim()) {
+          blob = (await speakInVoice(
+            voiceProfile.user_id,
+            overrideText,
+            accent,
+            voiceProfile.revision,
+            "target_accent"
+          )).audio;
+        } else {
+          blob = await cloneAccent(userAudio, accent, voiceProfile.user_id);
+        }
       } else {
         blob = await convertAccent(userAudio, accent);
       }
@@ -92,7 +105,7 @@ export default function AccentConvertCard({
       setErrorMsg((e as Error).message ?? "Could not convert");
       setState("error");
     }
-  }, [userAudio, accent, mode, voiceProfile, state]);
+  }, [userAudio, accent, mode, voiceProfile, overrideText, state]);
 
   const handleReplay = useCallback(() => {
     if (!convertedUrl) return;
@@ -219,7 +232,7 @@ export default function AccentConvertCard({
           ? errorMsg
           : isConverting
           ? mode === "personal"
-            ? "Cloning your voice with the target accent..."
+            ? "Locking the target accent to your voice..."
             : "Mapping your speech into the target accent..."
           : isReady
           ? "Compare it with your original above."
