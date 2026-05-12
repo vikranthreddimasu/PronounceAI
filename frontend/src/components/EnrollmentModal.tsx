@@ -182,11 +182,11 @@ export default function EnrollmentModal({
         alignItems: "center",
         justifyContent: "center",
         padding: 20,
-        animation: "fade-pop 220ms var(--ease-paper) both",
+        animation: "backdrop-in 200ms var(--ease-out) both",
       }}
     >
       <div
-        className="fade-pop card-paper"
+        className="modal-card card-paper"
         style={{
           width: "100%",
           maxWidth: 520,
@@ -230,9 +230,9 @@ export default function EnrollmentModal({
             style={{
               width: 30,
               height: 30,
-              borderRadius: 8,
+              borderRadius: 0,
               background: "var(--paper-2)",
-              border: "1px solid var(--line)",
+              border: "1px solid var(--rule)",
               color: "var(--ink-3)",
               fontSize: 16,
               lineHeight: 1,
@@ -254,10 +254,10 @@ export default function EnrollmentModal({
                 key={p.id}
                 style={{
                   flex: 1,
-                  height: 4,
-                  borderRadius: 9999,
+                  height: 3,
+                  borderRadius: 0,
                   background: i < idx ? "var(--jade)" : i === idx ? "var(--accent)" : "var(--paper-3)",
-                  transition: "background 240ms var(--ease-paper)",
+                  transition: "background-color 240ms var(--ease-out)",
                 }}
               />
             ))}

@@ -9,7 +9,7 @@ type Props = {
   getLevel: () => number | null;
 };
 
-const SIZE = 88;
+const SIZE = 72;
 
 export default function RecordButton({ state, onRecord, onStop, getLevel }: Props) {
   const ringRef  = useRef<HTMLSpanElement>(null);
@@ -62,8 +62,8 @@ export default function RecordButton({ state, onRecord, onStop, getLevel }: Prop
         style={{
           width: SIZE,
           height: SIZE,
-          borderRadius: "50%",
-          color: state === "processing" ? "var(--ink-4)" : "var(--bg)",
+          borderRadius: 0,
+          color: state === "processing" ? "var(--ink-4)" : "var(--paper)",
           flexShrink: 0,
         }}
         onClick={state === "idle" ? onRecord : state === "recording" ? onStop : undefined}

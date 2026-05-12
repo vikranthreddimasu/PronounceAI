@@ -7,19 +7,31 @@ type Props = { scores: Scores; overall: number };
 
 const DIMS: { key: keyof Scores; label: string; note: string; delay: number }[] = [
   { key: "phoneme_accuracy", label: "Phonemes", note: "GOP alignment", delay: 0 },
-  { key: "intonation", label: "Intonation", note: "F0 contour", delay: 90 },
-  { key: "stress_rhythm", label: "Rhythm", note: "stress timing", delay: 180 },
-  { key: "vowel_quality", label: "Vowels", note: "formant space", delay: 270 },
+  { key: "intonation", label: "Intonation", note: "F0 contour", delay: 60 },
+  { key: "stress_rhythm", label: "Rhythm", note: "stress timing", delay: 120 },
+  { key: "vowel_quality", label: "Vowels", note: "formant space", delay: 180 },
 ];
 
 function tone(value: number) {
-  return value >= 80 ? "var(--jade)" : value >= 60 ? "var(--accent)" : "var(--rose)";
+  return value >= 80 ? "var(--jade)" : value >= 60 ? "var(--ink)" : "var(--accent)";
 }
 
 export default function ScoreBars({ scores }: Props) {
   return (
-    <div className="result-enter" style={{ display: "grid", gap: 12 }}>
-      <p className="eyebrow">Score anatomy</p>
+    <div
+      className="result-enter"
+      style={{
+        display: "grid",
+        gap: 0,
+        borderTop: "1px solid var(--ink)",
+      }}
+    >
+      <p
+        className="eyebrow"
+        style={{ padding: "12px 0 10px", borderBottom: "1px solid var(--rule)" }}
+      >
+        Score Anatomy
+      </p>
       {DIMS.map(({ key, label, note, delay }) => (
         <DimRow key={key} label={label} note={note} value={scores[key]} delay={delay} />
       ))}
@@ -38,25 +50,62 @@ function DimRow({
   value: number;
   delay: number;
 }) {
-  const animated = useCountUp(value, 900, delay);
+  const animated = useCountUp(value, 620, delay);
   const color = tone(value);
 
   return (
-    <div className="quiet-panel" style={{ padding: "12px 12px 11px" }}>
-      <div className="flex items-end justify-between" style={{ gap: 12, marginBottom: 9 }}>
+    <div
+      style={{
+        display: "grid",
+        gap: 8,
+        padding: "12px 0 14px",
+        borderBottom: "1px solid var(--rule)",
+      }}
+    >
+      <div
+        className="flex items-baseline justify-between"
+        style={{ gap: 12 }}
+      >
         <div style={{ minWidth: 0 }}>
-          <p style={{ color: "var(--ink)", fontSize: 13, fontWeight: 640, letterSpacing: 0 }}>
+          <p
+            style={{
+              color: "var(--ink)",
+              fontFamily: "var(--type-sans)",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+            }}
+          >
             {label}
           </p>
-          <p className="font-mono" style={{ color: "var(--ink-4)", fontSize: 10, letterSpacing: 0, marginTop: 2 }}>
+          <p
+            className="font-mono"
+            style={{
+              color: "var(--ink-4)",
+              fontSize: 10,
+              letterSpacing: "0.04em",
+              marginTop: 4,
+              textTransform: "uppercase",
+            }}
+          >
             {note}
           </p>
         </div>
-        <p className="font-mono" style={{ color, fontSize: 13, fontWeight: 650 }}>
-          {Math.round(animated)}%
+        <p
+          className="font-mono"
+          style={{
+            color,
+            fontSize: 24,
+            fontWeight: 700,
+            letterSpacing: "-0.02em",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {Math.round(animated)}
         </p>
       </div>
-      <div className="dim-track" style={{ height: 6 }}>
+      <div className="dim-track" style={{ height: 3 }}>
         <div
           className="dim-fill"
           style={{

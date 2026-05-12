@@ -165,7 +165,7 @@ export default function AccentConvertCard({
               background: isPlaying ? "var(--surface-2)" : "var(--accent)",
               color: isPlaying ? "var(--ink-2)" : "var(--bg)",
               border: isPlaying ? "1px solid var(--line)" : "none",
-              transition: "all 220ms var(--ease-out)",
+              transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out)",
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
@@ -181,7 +181,6 @@ export default function AccentConvertCard({
                 borderTop: "5px solid transparent",
                 borderBottom: "5px solid transparent",
                 display: "inline-block",
-                animation: isPlaying ? "glyph-bob 1.4s ease-in-out infinite" : undefined,
               }}
             />
             {isPlaying ? "Playing" : "Replay"}
@@ -197,7 +196,7 @@ export default function AccentConvertCard({
               color: isConverting ? "var(--ink-3)" : "var(--bg)",
               border: isConverting ? "1px solid var(--line)" : "none",
               opacity: isConverting ? 0.85 : 1,
-              transition: "all 220ms var(--ease-out)",
+              transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), opacity 180ms var(--ease-out), border-color 180ms var(--ease-out)",
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
@@ -274,7 +273,7 @@ export default function AccentConvertCard({
             color: "var(--ink-3)",
             fontSize: 12,
             fontWeight: 500,
-            transition: "all 200ms var(--ease-out)",
+            transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out)",
           }}
         >
           Set up your voice to hear this accent in your own timbre
@@ -304,7 +303,7 @@ function ModeBtn({
         background: active ? "var(--surface-2)" : "transparent",
         color: active ? "var(--ink)" : "var(--ink-4)",
         border: active ? "1px solid var(--line)" : "1px solid transparent",
-        transition: "all 220ms var(--ease-out)",
+        transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out)",
       }}
     >
       {label}

@@ -84,9 +84,9 @@ export default function SettingsPage() {
               onClick={() => update({ targetAccent: a.id })}
               style={{
                 padding: "14px 18px",
-                borderRadius: 12,
-                border: `1px solid ${profile.targetAccent === a.id ? "var(--accent)" : "var(--line)"}`,
-                background: profile.targetAccent === a.id ? "var(--accent-faint)" : "var(--paper)",
+                borderRadius: 0,
+                border: `1px solid ${profile.targetAccent === a.id ? "var(--ink)" : "var(--rule)"}`,
+                background: profile.targetAccent === a.id ? "var(--paper-2)" : "var(--paper)",
                 textAlign: "left",
                 display: "flex",
                 alignItems: "center",
@@ -97,14 +97,11 @@ export default function SettingsPage() {
               <span
                 aria-hidden
                 style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: "50%",
-                  border: `2px solid ${profile.targetAccent === a.id ? "var(--accent)" : "var(--line-2)"}`,
-                  background:
-                    profile.targetAccent === a.id
-                      ? "radial-gradient(circle, var(--accent) 0%, var(--accent) 40%, transparent 45%)"
-                      : "transparent",
+                  width: 14,
+                  height: 14,
+                  borderRadius: 0,
+                  border: `1px solid ${profile.targetAccent === a.id ? "var(--ink)" : "var(--ink-4)"}`,
+                  background: profile.targetAccent === a.id ? "var(--accent)" : "transparent",
                   flexShrink: 0,
                 }}
               />
@@ -131,11 +128,13 @@ export default function SettingsPage() {
           style={{
             width: "100%",
             padding: "12px 14px",
-            borderRadius: 10,
-            border: "1px solid var(--line)",
+            borderRadius: 0,
+            border: "1px solid var(--rule)",
             background: "var(--paper)",
-            color: "var(--ink-2)",
-            fontSize: 13,
+            color: "var(--ink)",
+            fontFamily: "var(--type-mono)",
+            fontSize: 12,
+            letterSpacing: "0.04em",
             outline: "none",
             appearance: "none",
           }}
@@ -327,12 +326,15 @@ export default function SettingsPage() {
           onClick={toggleSounds}
           style={{
             padding: "12px 16px",
-            borderRadius: 12,
-            border: "1px solid var(--line)",
-            background: sounds ? "var(--accent-faint)" : "var(--paper)",
-            color: sounds ? "var(--accent)" : "var(--ink-3)",
-            fontSize: 13,
-            fontWeight: 600,
+            borderRadius: 0,
+            border: `1px solid ${sounds ? "var(--ink)" : "var(--rule)"}`,
+            background: "var(--paper)",
+            color: "var(--ink)",
+            fontFamily: "var(--type-sans)",
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
@@ -345,25 +347,26 @@ export default function SettingsPage() {
           <span
             aria-hidden
             style={{
-              width: 36,
+              width: 40,
               height: 20,
-              borderRadius: 9999,
-              background: sounds ? "var(--accent)" : "var(--paper-3)",
+              borderRadius: 0,
+              border: "1px solid var(--ink)",
+              background: sounds ? "var(--ink)" : "transparent",
               position: "relative",
-              transition: "background 220ms var(--ease-paper)",
+              transition: "background-color 180ms var(--ease-out)",
             }}
           >
             <span
               style={{
                 position: "absolute",
                 top: 2,
-                left: sounds ? 18 : 2,
-                width: 16,
-                height: 16,
-                borderRadius: "50%",
-                background: "#fefaf0",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
-                transition: "left 220ms var(--ease-paper)",
+                left: 2,
+                width: 14,
+                height: 14,
+                borderRadius: 0,
+                background: sounds ? "var(--paper)" : "var(--ink)",
+                transform: sounds ? "translateX(20px)" : "translateX(0)",
+                transition: "transform 180ms var(--ease-out), background-color 180ms var(--ease-out)",
               }}
             />
           </span>

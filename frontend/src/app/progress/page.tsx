@@ -137,7 +137,7 @@ export default function ProgressPage() {
 }
 
 function SessionRow({ session }: { session: Session }) {
-  const tone = session.overall >= 80 ? "var(--jade)" : session.overall >= 65 ? "var(--accent)" : "var(--rose)";
+  const tone = session.overall >= 80 ? "var(--jade)" : session.overall >= 65 ? "var(--ink)" : "var(--accent)";
   return (
     <article className="attempt-row">
       <span className="attempt-score" style={{ color: tone, borderColor: tone }}>

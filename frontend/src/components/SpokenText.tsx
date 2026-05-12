@@ -107,7 +107,7 @@ export default function SpokenText({ words, audio, playing, size = "md" }: Props
               style={{
                 color,
                 fontWeight: weight,
-                transition: "color 100ms var(--ease-out), font-weight 100ms var(--ease-out)",
+                transition: "color 140ms var(--ease-out)",
                 display: "inline",
               }}
             >

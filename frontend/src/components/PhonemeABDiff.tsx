@@ -99,10 +99,11 @@ export default function PhonemeABDiff({
 
       <div
         style={{
-          padding: "18px 18px 16px",
-          borderRadius: 16,
-          background: "var(--surface)",
-          border: "1px solid var(--line)",
+          padding: "18px 0",
+          borderRadius: 0,
+          background: "transparent",
+          borderTop: "1px solid var(--rule)",
+          borderBottom: "1px solid var(--rule)",
         }}
       >
         {/* Worst phoneme IPA glyphs */}
@@ -134,9 +135,9 @@ export default function PhonemeABDiff({
         <div
           style={{
             position: "relative",
-            height: 6,
-            background: "var(--surface-2)",
-            borderRadius: 9999,
+            height: 4,
+            background: "var(--paper-3)",
+            borderRadius: 0,
             overflow: "hidden",
             marginBottom: 14,
           }}
@@ -150,10 +151,9 @@ export default function PhonemeABDiff({
               width: `${widthPct * 100}%`,
               top: 0,
               bottom: 0,
-              background: "var(--rose)",
-              opacity: 0.85,
-              borderRadius: 9999,
-              boxShadow: "0 0 12px var(--rose)",
+              background: "var(--accent)",
+              opacity: 0.9,
+              borderRadius: 0,
             }}
           />
         </div>
@@ -195,14 +195,17 @@ export default function PhonemeABDiff({
             marginTop: 10,
             width: "100%",
             padding: "9px 0",
-            borderRadius: 10,
+            borderRadius: 0,
             background: "transparent",
-            border: "1px solid var(--line)",
+            border: "1px solid var(--rule)",
             color: "var(--ink-3)",
-            fontSize: 12,
-            fontWeight: 500,
+            fontFamily: "var(--type-sans)",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
             opacity: step !== "idle" ? 0.5 : 1,
-            transition: "all 180ms var(--ease-out)",
+            transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out), opacity 180ms var(--ease-out)",
           }}
         >
           {step === "idle" ? "Play native, you, native" : "Playing..."}
@@ -225,16 +228,16 @@ function PhonemeGlyph({
   return (
     <div className="flex flex-col items-center fade-pop" style={{ gap: 3 }}>
       <span
-        className="font-display glyph-bob"
         style={{
           width: 44,
           height: 44,
-          borderRadius: 12,
-          background: color + "18",
-          border: `1.5px solid ${color}`,
+          borderRadius: 0,
+          background: "transparent",
+          border: `1px solid ${color}`,
           color,
-          fontSize: 22,
-          fontWeight: 600,
+          fontFamily: "var(--type-mono)",
+          fontSize: 20,
+          fontWeight: 500,
           lineHeight: "42px",
           textAlign: "center",
           letterSpacing: 0,
@@ -280,31 +283,34 @@ function ABStepBtn({
       style={{
         flex: 1,
         padding: "10px 0",
-        borderRadius: 10,
-        background: active ? color + "22" : "var(--surface-2)",
-        border: `1px solid ${active ? color : "var(--line)"}`,
-        color: active ? color : "var(--ink-3)",
-        fontSize: 12,
-        fontWeight: 600,
+        borderRadius: 0,
+        background: active ? color : "transparent",
+        border: `1px solid ${active ? color : "var(--rule)"}`,
+        color: active ? "var(--paper)" : "var(--ink)",
+        fontFamily: "var(--type-sans)",
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "0.14em",
+        textTransform: "uppercase",
         opacity: disabled && !active ? 0.4 : 1,
         cursor: disabled ? "default" : "pointer",
-        transition: "all 180ms var(--ease-out)",
+        transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out), opacity 180ms var(--ease-out)",
       }}
     >
       <span
-        className={active ? "pulse-ring" : undefined}
         style={{
           display: "inline-block",
-          width: 14,
-          height: 14,
-          borderRadius: 9999,
-          background: active ? color : "transparent",
-          color: active ? "var(--bg)" : "var(--ink-4)",
-          border: active ? "none" : "1px solid var(--line-2)",
-          fontSize: 9,
+          width: 16,
+          height: 16,
+          borderRadius: 0,
+          background: active ? "var(--paper)" : "transparent",
+          color: active ? color : "var(--ink-4)",
+          border: active ? "none" : "1px solid var(--rule)",
+          fontFamily: "var(--type-mono)",
+          fontSize: 10,
           fontWeight: 700,
-          lineHeight: "14px",
-          marginRight: 6,
+          lineHeight: "16px",
+          marginRight: 8,
           verticalAlign: "middle",
         }}
       >

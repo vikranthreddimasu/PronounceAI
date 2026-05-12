@@ -554,13 +554,13 @@ function Review({
                 <li
                   key={`${tip.text}-${index}`}
                   style={{
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    background: "var(--paper-2)",
-                    border: "1px solid var(--line)",
+                    padding: "10px 14px",
+                    borderRadius: 0,
+                    background: "transparent",
+                    borderLeft: "2px solid var(--ink)",
                     color: "var(--ink-2)",
                     fontSize: 13,
-                    lineHeight: 1.45,
+                    lineHeight: 1.5,
                   }}
                 >
                   {tip.text}
