@@ -47,6 +47,15 @@ Use `backend/.env.example` as a template for `backend/.env.local`. Model checkpo
 
 See [`API.md`](./API.md) for routes and payloads.
 
+## Deploy
+
+Use Vercel for the Next.js frontend and Daytona for the long-running FastAPI
+backend. The backend has local PyTorch/audio models, so it should run as a
+container rather than as serverless functions.
+
+See [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) for the exact backend Docker
+setup, Vercel environment variables, and final-submission fallback plan.
+
 ## Main user flows
 
 - **Practice** (`/practice`) — Pick or type a phrase, hear target TTS (`/api/tts`), record, **`POST /api/score`**, review phonemes and prosody cues. Progress is stored only in **localStorage** (no accounts).

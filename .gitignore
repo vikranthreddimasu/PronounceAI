@@ -1,7 +1,8 @@
 # Large datasets + user-generated audio (personal voice enrollments)
 librispeech/*
 backend/data/
-backend/checkpoints/
+backend/checkpoints/*
+!backend/checkpoints/.gitkeep
 backend/cache/
 
 # Audio artifacts (recorded clips, synth outputs, model weights)
