@@ -267,7 +267,7 @@ def gen_score_samples() -> list[dict]:
 
 
 def wav_to_mp4(wav_path: Path) -> Path | None:
-    """Encode WAV → MP4 with a violet waveform overlay so the README plays it inline."""
+    """Encode WAV → MP4 with a violet waveform overlay so the MP4 plays in-browser."""
     if shutil.which("ffmpeg") is None:
         logger.warning("ffmpeg not on PATH — skipping MP4 conversion for %s", wav_path.name)
         return None
@@ -292,6 +292,47 @@ def wav_to_mp4(wav_path: Path) -> Path | None:
     return mp4_path
 
 
+def wav_to_thumbnail_png(wav_path: Path) -> Path | None:
+    """Render a static waveform PNG with a violet play-button overlay.
+
+    The README displays these thumbnails as clickable links to the MP4
+    release asset, because GitHub's README renderer does not embed
+    <audio> tags or auto-embed bare release URLs as players.
+    """
+    if shutil.which("ffmpeg") is None:
+        return None
+    thumb_path = wav_path.parent / f"{wav_path.stem}_thumb.png"
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_path),
+        "-filter_complex",
+        "color=c=0x0D1117:s=1280x180:d=1[bg];"
+        "[0:a]showwavespic=s=1280x180:colors=0xA78BFA[wave];"
+        "[bg][wave]overlay=shortest=1",
+        "-frames:v", "1",
+        str(thumb_path),
+    ]
+    res = subprocess.run(cmd, capture_output=True)
+    if res.returncode != 0:
+        logger.warning("ffmpeg thumb failed for %s: %s", wav_path.name, res.stderr.decode(errors="ignore")[:200])
+        return None
+    # Composite a play-button (violet disc + white triangle) onto the waveform.
+    try:
+        from PIL import Image, ImageDraw
+        img = Image.open(thumb_path).convert("RGBA")
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(overlay)
+        cx, cy, r = img.width // 2, img.height // 2, 36
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(124, 58, 237, 235))
+        tri = [(cx - 12, cy - 18), (cx - 12, cy + 18), (cx + 20, cy)]
+        d.polygon(tri, fill=(255, 255, 255, 255))
+        out = Image.alpha_composite(img, overlay).convert("RGB")
+        out.save(thumb_path, optimize=True)
+    except Exception as e:
+        logger.warning("PIL play-button composite failed for %s: %s", thumb_path.name, e)
+    logger.info("wrote %s", thumb_path.relative_to(REPO_ROOT))
+    return thumb_path
+
+
 def main() -> None:
     print(">>> Generating TTS samples")
     tts = gen_tts_samples()
@@ -305,12 +346,19 @@ def main() -> None:
     voice = gen_voice_clone_samples()
     print(f"    {len(voice)} voice-clone clips")
 
-    print(">>> Encoding WAV → MP4 (waveform overlay) for GitHub inline playback")
+    print(">>> Encoding WAV → MP4 (waveform overlay)")
     mp4_count = 0
     for wav in sorted(SAMPLES_DIR.glob("*.wav")):
         if wav_to_mp4(wav) is not None:
             mp4_count += 1
     print(f"    {mp4_count} MP4 files")
+
+    print(">>> Rendering static thumbnails for the README gallery")
+    thumb_count = 0
+    for wav in sorted(SAMPLES_DIR.glob("*.wav")):
+        if wav_to_thumbnail_png(wav) is not None:
+            thumb_count += 1
+    print(f"    {thumb_count} thumbnail PNGs")
 
     manifest = {
         "generated_by": "backend/scripts/generate_readme_samples.py",
@@ -318,6 +366,7 @@ def main() -> None:
         "voice_clone": sorted(p.name for p in SAMPLES_DIR.glob("voice_*.wav")),
         "score": sorted(p.name for p in SAMPLES_DIR.glob("score_*.json")),
         "mp4": sorted(p.name for p in SAMPLES_DIR.glob("*.mp4")),
+        "thumbnails": sorted(p.name for p in SAMPLES_DIR.glob("*_thumb.png")),
     }
     manifest_path = SAMPLES_DIR / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
