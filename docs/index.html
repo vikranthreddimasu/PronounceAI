@@ -1,203 +1,315 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>PronounceAI · Sample Gallery</title>
-<meta name="description" content="Inline-playable audio samples for the PronounceAI README — voice cloning across emotions and accents, pronunciation scoring references, and a maintainer voice-clone comparison." />
+<title>PronounceAI · Samples</title>
+<meta name="color-scheme" content="dark" />
+<link rel="preconnect" href="https://rsms.me/" />
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
 <style>
   :root {
-    --bg:    #0D1117;
-    --panel: #161B22;
-    --line:  #21262D;
-    --ink:   #E6EDF3;
-    --ink-2: #8B949E;
-    --accent:#A78BFA;
-    --accent-dim:#7C3AED;
+    color-scheme: dark;
+    --bg:    #0A0A0B;
+    --fg:    #E8E8EA;
+    --fg-2:  #9A9AA0;
+    --fg-3:  #5F5F66;
+    --line:  #1F1F22;
+    --accent:#B89CFF;
+    --ease:  cubic-bezier(0.23, 1, 0.32, 1);
   }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  @supports (font-variation-settings: normal) {
+    html { font-family: 'InterVariable', 'Inter', system-ui, sans-serif; }
+  }
+
   body {
     margin: 0;
     background: var(--bg);
-    color: var(--ink);
-    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    -webkit-font-smoothing: antialiased;
+    color: var(--fg);
+    font-size: 15px;
+    line-height: 1.55;
+    font-feature-settings: "cv11", "ss03", "calt";
   }
-  main { max-width: 980px; margin: 0 auto; padding: 56px 24px 96px; }
-  header { margin-bottom: 56px; }
-  header .eyebrow {
-    color: var(--accent);
+
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 120px 28px 160px;
+    opacity: 0;
+    transform: translateY(6px);
+    animation: enter 360ms var(--ease) forwards;
+    animation-delay: 60ms;
+  }
+
+  @keyframes enter {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  header {
+    margin-bottom: 96px;
+  }
+
+  .kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-size: 12px;
+    color: var(--fg-3);
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    transition: color 180ms var(--ease);
+  }
+  .kicker:hover { color: var(--fg-2); }
+  .kicker::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  h1 {
+    margin: 18px 0 0;
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.022em;
+    line-height: 1.2;
+  }
+
+  h2 {
+    margin: 80px 0 28px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--fg-3);
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    margin-bottom: 12px;
   }
-  h1 { font-size: 40px; line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
-  h2 {
-    font-size: 22px;
-    margin: 56px 0 8px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--line);
-    letter-spacing: -0.01em;
-  }
-  p.lede { color: var(--ink-2); font-size: 17px; margin: 0 0 8px; max-width: 760px; }
-  .back-to-readme {
-    display: inline-block;
-    margin-top: 12px;
-    padding: 7px 14px;
-    border-radius: 999px;
-    border: 1px solid var(--line);
-    color: var(--ink-2);
-    text-decoration: none;
-    font-size: 13px;
-  }
-  .back-to-readme:hover { color: var(--ink); border-color: var(--accent-dim); }
 
   .clip {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 18px 20px;
-    margin: 14px 0;
-    scroll-margin-top: 24px;
+    padding: 22px 0 26px;
+    border-bottom: 1px solid var(--line);
   }
-  .clip h3 {
-    margin: 0 0 4px;
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--ink);
+  .clip:last-of-type { border-bottom: 0; }
+  .clip:target {
+    /* Subtle anchor highlight; fades after a moment.
+       :target makes the linked-to clip recognisable without flashing. */
+    animation: target-pulse 1200ms var(--ease);
   }
-  .clip h3 .tag {
-    display: inline-block;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-left: 8px;
+  @keyframes target-pulse {
+    0%   { background: rgba(184, 156, 255, 0.06); }
+    100% { background: transparent; }
   }
-  .clip blockquote {
-    margin: 8px 0 14px;
-    padding-left: 12px;
-    border-left: 2px solid var(--accent-dim);
-    color: var(--ink-2);
-    font-style: italic;
+
+  .clip-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 10px;
   }
+
+  .clip-title {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: -0.005em;
+  }
+
+  .clip-meta {
+    font-size: 12px;
+    color: var(--fg-3);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .quote {
+    margin: 0 0 14px;
+    color: var(--fg-2);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
   audio {
     width: 100%;
-    height: 40px;
-    border-radius: 8px;
-    margin-top: 8px;
-    color-scheme: dark;
+    height: 36px;
+    border-radius: 10px;
   }
-  .grid {
+  audio::-webkit-media-controls-panel {
+    background-color: #141417;
+  }
+
+  .hero {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-    margin: 14px 0 28px;
+    gap: 16px;
+    grid-template-columns: 1fr;
+    margin-top: 28px;
   }
-  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
-  .hero { background: linear-gradient(160deg, #1d1a35 0%, var(--panel) 100%); border-color: #2a2350; }
-  .hero h3 { color: var(--accent); }
-  .footer {
-    margin-top: 64px;
-    padding-top: 24px;
+  @media (min-width: 720px) {
+    .hero { grid-template-columns: 1fr 1fr; gap: 14px; }
+  }
+  .hero .clip {
+    padding: 18px 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    transition: border-color 220ms var(--ease);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .hero .clip:hover { border-color: #2D2A3A; }
+  }
+  .hero .clip-title small {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  footer {
+    margin-top: 96px;
+    padding-top: 22px;
     border-top: 1px solid var(--line);
-    color: var(--ink-2);
-    font-size: 13px;
+    color: var(--fg-3);
+    font-size: 12px;
   }
-  .footer a { color: var(--accent); text-decoration: none; }
-  .footer a:hover { text-decoration: underline; }
-  a { color: var(--accent); }
+  footer a {
+    color: var(--fg-2);
+    text-decoration: none;
+    border-bottom: 1px solid var(--line);
+    transition: color 180ms var(--ease), border-color 180ms var(--ease);
+  }
+  footer a:hover { color: var(--fg); border-color: var(--fg-3); }
+
+  @media (prefers-reduced-motion: reduce) {
+    main { animation: none; opacity: 1; transform: none; }
+    .clip:target { animation: none; }
+    * { transition-duration: 0ms !important; }
+  }
 </style>
 </head>
 <body>
 <main>
 
 <header>
-  <div class="eyebrow">PronounceAI · Sample gallery</div>
-  <h1>Hear what the system produces.</h1>
-  <p class="lede">Native HTML5 audio players. Every clip is a real artifact emitted by the pipeline in <a href="https://github.com/vikranthreddimasu/PronounceAI">github.com/vikranthreddimasu/PronounceAI</a>. Click any play button to listen — no downloads.</p>
-  <a class="back-to-readme" href="https://github.com/vikranthreddimasu/PronounceAI#readme">← back to README</a>
+  <a class="kicker" href="https://github.com/vikranthreddimasu/PronounceAI#readme">PronounceAI</a>
+  <h1>Samples produced by the pipeline.</h1>
 </header>
 
-<h2>Voice clone of the maintainer</h2>
-<p class="lede">A learner's enrolled voice, then the same speaker rendered in a long American-English sentence they never recorded — produced by the pipeline in this repository.</p>
-<div class="grid">
-  <section class="clip hero" id="user-original">
-    <h3>Natural voice<span class="tag">enrolment</span></h3>
-    <blockquote>"Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river…"</blockquote>
+<h2>Voice clone</h2>
+<div class="hero">
+  <article class="clip" id="user-original">
+    <div class="clip-head">
+      <div class="clip-title">Maintainer's voice<small>Enrolment</small></div>
+      <div class="clip-meta">13.1 s · WAV</div>
+    </div>
+    <p class="quote">"Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river…"</p>
     <audio controls preload="metadata" src="samples/voice_user_original.wav"></audio>
-  </section>
-  <section class="clip hero" id="user-clone-ga">
-    <h3>Rendered in General American<span class="tag">CosyVoice 3 VC</span></h3>
-    <blockquote>"The renewable energy transition will define the next half-century, and the engineers who solve the storage problem will reshape every industry from agriculture to artificial intelligence."</blockquote>
+  </article>
+  <article class="clip" id="user-clone-ga">
+    <div class="clip-head">
+      <div class="clip-title">Same speaker, GA<small>CosyVoice 3 VC</small></div>
+      <div class="clip-meta">11.2 s · WAV</div>
+    </div>
+    <p class="quote">"The renewable energy transition will define the next half-century, and the engineers who solve the storage problem will reshape every industry from agriculture to artificial intelligence."</p>
     <audio controls preload="metadata" src="samples/voice_user_clone_ga.wav"></audio>
-  </section>
+  </article>
 </div>
 
-<h2>Voice cloning across emotions and accents</h2>
-<p class="lede">CosyVoice 3 voice conversion. One synthetic enrolment; every clip below shares the same speaker identity with a different emotional + accent target.</p>
+<h2>Emotion · accent variants</h2>
 
-<section class="clip" id="happy-ga">
-  <h3>Happy <span class="tag">General American</span></h3>
-  <blockquote>"I just got promoted today. I am so excited for the future!"</blockquote>
+<article class="clip" id="happy-ga">
+  <div class="clip-head">
+    <div class="clip-title">Happy · GA</div>
+    <div class="clip-meta">CosyVoice 3</div>
+  </div>
+  <p class="quote">"I just got promoted today. I am so excited for the future!"</p>
   <audio controls preload="metadata" src="samples/voice_happy_ga.wav"></audio>
-</section>
+</article>
 
-<section class="clip" id="sad-rp">
-  <h3>Sad <span class="tag">Received Pronunciation</span></h3>
-  <blockquote>"The old photograph brought back so many precious memories."</blockquote>
+<article class="clip" id="sad-rp">
+  <div class="clip-head">
+    <div class="clip-title">Sad · RP</div>
+    <div class="clip-meta">CosyVoice 3</div>
+  </div>
+  <p class="quote">"The old photograph brought back so many precious memories."</p>
   <audio controls preload="metadata" src="samples/voice_sad_rp.wav"></audio>
-</section>
+</article>
 
-<section class="clip" id="angry-ga">
-  <h3>Angry <span class="tag">General American</span></h3>
-  <blockquote>"This is completely unacceptable. I demand to speak to the manager."</blockquote>
+<article class="clip" id="angry-ga">
+  <div class="clip-head">
+    <div class="clip-title">Angry · GA</div>
+    <div class="clip-meta">CosyVoice 3</div>
+  </div>
+  <p class="quote">"This is completely unacceptable. I demand to speak to the manager."</p>
   <audio controls preload="metadata" src="samples/voice_angry_ga.wav"></audio>
-</section>
+</article>
 
-<section class="clip" id="calm-rp">
-  <h3>Calm <span class="tag">Received Pronunciation</span></h3>
-  <blockquote>"Close your eyes. Breathe in slowly. Let the tension fade away."</blockquote>
+<article class="clip" id="calm-rp">
+  <div class="clip-head">
+    <div class="clip-title">Calm · RP</div>
+    <div class="clip-meta">CosyVoice 3</div>
+  </div>
+  <p class="quote">"Close your eyes. Breathe in slowly. Let the tension fade away."</p>
   <audio controls preload="metadata" src="samples/voice_calm_rp.wav"></audio>
-</section>
+</article>
 
-<section class="clip" id="whisper-ga">
-  <h3>Whisper <span class="tag">General American</span></h3>
-  <blockquote>"I need to tell you a secret, but you must promise not to tell anyone."</blockquote>
+<article class="clip" id="whisper-ga">
+  <div class="clip-head">
+    <div class="clip-title">Whisper · GA</div>
+    <div class="clip-meta">CosyVoice 3</div>
+  </div>
+  <p class="quote">"I need to tell you a secret, but you must promise not to tell anyone."</p>
   <audio controls preload="metadata" src="samples/voice_whisper_ga.wav"></audio>
-</section>
+</article>
 
-<h2>Native references for the pronunciation scorer</h2>
-<p class="lede">Kokoro 82M reference audio used by <code>/api/score</code> and by the practice UI's "hear native" button.</p>
+<h2>Native references</h2>
 
-<section class="clip" id="tts-ship">
-  <h3>Ship or sheep? <span class="tag">General American</span></h3>
+<article class="clip" id="tts-ship">
+  <div class="clip-head">
+    <div class="clip-title">Ship or sheep?</div>
+    <div class="clip-meta">Kokoro 82M · GA</div>
+  </div>
   <audio controls preload="metadata" src="samples/tts_ga_ship_or_sheep.wav"></audio>
-  <audio controls preload="metadata" src="samples/tts_rp_ship_or_sheep.wav" style="margin-top:10px"></audio>
-  <p style="color:var(--ink-2); font-size:13px; margin:8px 0 0">Top: GA &nbsp;·&nbsp; Bottom: RP</p>
-</section>
+  <div class="clip-head" style="margin-top: 18px;">
+    <div class="clip-title">Ship or sheep?</div>
+    <div class="clip-meta">Kokoro 82M · RP</div>
+  </div>
+  <audio controls preload="metadata" src="samples/tts_rp_ship_or_sheep.wav"></audio>
+</article>
 
-<section class="clip" id="tts-seashells">
-  <h3>She sells seashells by the seashore. <span class="tag">General American</span></h3>
+<article class="clip" id="tts-seashells">
+  <div class="clip-head">
+    <div class="clip-title">She sells seashells by the seashore.</div>
+    <div class="clip-meta">Kokoro 82M · GA</div>
+  </div>
   <audio controls preload="metadata" src="samples/tts_ga_seashells.wav"></audio>
-</section>
+</article>
 
-<section class="clip" id="tts-fox">
-  <h3>The quick brown fox jumps over the lazy dog. <span class="tag">General American</span></h3>
+<article class="clip" id="tts-fox">
+  <div class="clip-head">
+    <div class="clip-title">The quick brown fox jumps over the lazy dog.</div>
+    <div class="clip-meta">Kokoro 82M · GA</div>
+  </div>
   <audio controls preload="metadata" src="samples/tts_ga_quick_brown_fox.wav"></audio>
-</section>
+</article>
 
-<section class="clip" id="tts-route">
-  <h3>Could you show me the fastest route to the station? <span class="tag">Received Pronunciation</span></h3>
+<article class="clip" id="tts-route">
+  <div class="clip-head">
+    <div class="clip-title">Could you show me the fastest route to the station?</div>
+    <div class="clip-meta">Kokoro 82M · RP</div>
+  </div>
   <audio controls preload="metadata" src="samples/tts_rp_fastest_route.wav"></audio>
-</section>
+</article>
 
-<div class="footer">
-  <p>Each clip is also committed to the repository under <a href="https://github.com/vikranthreddimasu/PronounceAI/tree/main/docs/samples">docs/samples/</a>. Regenerate them with <code>backend/scripts/generate_readme_samples.py</code> (idempotent).</p>
-  <p>This page is served by GitHub Pages from the <code>main</code> branch <code>/docs</code> directory. The audio elements use the browser's native HTML5 player — no third-party scripts, no analytics, no autoplay.</p>
-</div>
+<footer>
+  Source &nbsp;·&nbsp; <a href="https://github.com/vikranthreddimasu/PronounceAI/tree/main/docs/samples">docs/samples</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/vikranthreddimasu/PronounceAI/blob/main/backend/scripts/generate_readme_samples.py">regenerate</a>
+</footer>
 
 </main>
 </body>
