@@ -48,6 +48,9 @@ PHONEME_SCORER_CHECKPOINT = os.getenv("PHONEME_SCORER_CHECKPOINT", "checkpoints/
 ACCENT_CENTROIDS_PATH = os.getenv("ACCENT_CENTROIDS_PATH", "checkpoints/accent_centroids.pt")
 ASSESSMENT_SCORER_CHECKPOINT = os.getenv("ASSESSMENT_SCORER_CHECKPOINT", "checkpoints/assessment_head_best.pt")
 PREWARM_MODELS = os.getenv("PREWARM_MODELS", "0") == "1"
+LOAD_WHISPER = os.getenv("LOAD_WHISPER", "1") == "1"
+LOAD_VOICE_CLONE = os.getenv("LOAD_VOICE_CLONE", "1") == "1"
+LOAD_WAVLM = os.getenv("SCORE_WAVLM_MODE", "auto").lower() != "off"
 PREWARM_PHRASES = [
     p.strip()
     for p in os.getenv("PREWARM_PHRASES", "").split("|")
@@ -104,9 +107,12 @@ async def lifespan(app: FastAPI):
         app.state.assessment_scorer = None
 
     needs_wavlm = (
-        Path(ACCENT_CENTROIDS_PATH).exists()
-        or app.state.assessment_scorer is not None
-        or os.getenv("FORCE_WAVLM_ENGINE", "0") == "1"
+        LOAD_WAVLM
+        and (
+            Path(ACCENT_CENTROIDS_PATH).exists()
+            or app.state.assessment_scorer is not None
+            or os.getenv("FORCE_WAVLM_ENGINE", "0") == "1"
+        )
     )
     if needs_wavlm:
         try:
@@ -122,11 +128,18 @@ async def lifespan(app: FastAPI):
             app.state.accent_engine = None
     else:
         app.state.accent_engine = None
-        logger.info("Skipping WavLM embedding engine — no local checkpoint or centroids found")
+        if not LOAD_WAVLM:
+            logger.info("Skipping WavLM embedding engine — SCORE_WAVLM_MODE=off")
+        else:
+            logger.info("Skipping WavLM embedding engine — no local checkpoint or centroids found")
 
-    from app.models.whisper_engine import WhisperEngine
-    app.state.whisper = WhisperEngine()
-    logger.info("Whisper engine ready")
+    if LOAD_WHISPER:
+        from app.models.whisper_engine import WhisperEngine
+        app.state.whisper = WhisperEngine()
+        logger.info("Whisper engine ready")
+    else:
+        app.state.whisper = None
+        logger.info("Skipping Whisper engine — LOAD_WHISPER=0")
 
     app.state.accent_converter = None
     app.state.accent_converter_lock = asyncio.Lock()
@@ -142,16 +155,20 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Accent converter will lazy-load on first use")
 
-    try:
-        from app.models.voice_clone import VoiceClone
-        # Whisper engine is loaded above; pass it so VoiceClone can validate
-        # instruct-mode output and fall back to VC when the LLM drifts.
-        app.state.voice_clone = VoiceClone(whisper_engine=app.state.whisper)
-        app.state.voice_clone.warmup()
-        logger.info("Voice clone engine ready")
-    except Exception as e:
-        logger.warning(f"Voice clone engine unavailable: {e}")
+    if LOAD_VOICE_CLONE:
+        try:
+            from app.models.voice_clone import VoiceClone
+            # Whisper engine is loaded above; pass it so VoiceClone can validate
+            # instruct-mode output and fall back to VC when the LLM drifts.
+            app.state.voice_clone = VoiceClone(whisper_engine=app.state.whisper)
+            app.state.voice_clone.warmup()
+            logger.info("Voice clone engine ready")
+        except Exception as e:
+            logger.warning(f"Voice clone engine unavailable: {e}")
+            app.state.voice_clone = None
+    else:
         app.state.voice_clone = None
+        logger.info("Skipping voice clone engine — LOAD_VOICE_CLONE=0")
 
     try:
         from app.models.emotion_detector import EmotionDetector

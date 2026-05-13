@@ -32,6 +32,10 @@ KOKORO_SR = 24_000
 TARGET_SR = 16_000
 DISK_CACHE_ENABLED = os.getenv("NATIVE_F0_DISK_CACHE", "1") == "1"
 DISK_CACHE_DIR = Path(os.getenv("NATIVE_F0_CACHE_DIR", "cache/native_f0"))
+KOKORO_REPO_ID = os.getenv("KOKORO_REPO_ID", "hexgrad/Kokoro-82M")
+KOKORO_DEVICE = os.getenv("KOKORO_DEVICE", "cpu")
+KOKORO_CONFIG = os.getenv("KOKORO_CONFIG", "").strip()
+KOKORO_MODEL = os.getenv("KOKORO_MODEL", "").strip()
 
 
 # Voice map mirrors app/api/tts.py — kept inline so this module has zero coupling
@@ -48,12 +52,30 @@ _VOICE_MAP = {
 _PIPELINE_LOCK = threading.RLock()
 
 
+@lru_cache(maxsize=1)
+def _get_model_cached():
+    if not (KOKORO_CONFIG and KOKORO_MODEL):
+        return True
+    from kokoro.model import KModel
+    logger.info(f"native_pitch: loading Kokoro model files config={KOKORO_CONFIG} model={KOKORO_MODEL}")
+    return KModel(
+        repo_id=KOKORO_REPO_ID,
+        config=KOKORO_CONFIG,
+        model=KOKORO_MODEL,
+    ).to(KOKORO_DEVICE).eval()
+
+
 @lru_cache(maxsize=2)
 def _get_pipeline_cached(lang_code: str):
     """Cached Kokoro pipeline — one per language code."""
     from kokoro import KPipeline
-    logger.info(f"native_pitch: loading Kokoro lang_code={lang_code}")
-    return KPipeline(lang_code=lang_code)
+    logger.info(f"native_pitch: loading Kokoro lang_code={lang_code} repo_id={KOKORO_REPO_ID}")
+    return KPipeline(
+        lang_code=lang_code,
+        repo_id=KOKORO_REPO_ID,
+        model=_get_model_cached(),
+        device=KOKORO_DEVICE,
+    )
 
 
 def _get_pipeline(lang_code: str):

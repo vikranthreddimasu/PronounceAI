@@ -16,6 +16,20 @@ training/
 evaluation/
 tests/
 scripts/
+requirements.txt
+!requirements.prod.txt
+models/*
+!models/.gitkeep
+!models/wav2vec2-phoneme/
+!models/wav2vec2-phoneme/**
+!models/wavlm-large/
+!models/wavlm-large/**
+!models/faster-whisper-small-en/
+!models/faster-whisper-small-en/**
+!models/kokoro-82m/
+!models/kokoro-82m/**
+!models/emotion-english-distilroberta-base/
+!models/emotion-english-distilroberta-base/**
 
 # Keep the deploy image focused on runtime checkpoints only.
 checkpoints/*

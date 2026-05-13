@@ -11,6 +11,7 @@ hits zero latency after the first synthesis.
 """
 import io
 import logging
+import os
 import threading
 from functools import lru_cache
 
@@ -36,6 +37,10 @@ MAX_TTS_TEXT_CHARS = 400
 SAMPLE_RATE = 24000   # Kokoro native output rate
 _PIPELINE_LOCK = threading.RLock()
 _AUDIO_CACHE_LOCK = threading.RLock()
+KOKORO_REPO_ID = os.getenv("KOKORO_REPO_ID", "hexgrad/Kokoro-82M")
+KOKORO_DEVICE = os.getenv("KOKORO_DEVICE", "cpu")
+KOKORO_CONFIG = os.getenv("KOKORO_CONFIG", "").strip()
+KOKORO_MODEL = os.getenv("KOKORO_MODEL", "").strip()
 
 
 def _synthesize(text: str, lang_code: str, voice: str, speed: float) -> bytes:
@@ -53,12 +58,30 @@ def _synthesize(text: str, lang_code: str, voice: str, speed: float) -> bytes:
     return buf.getvalue()
 
 
+@lru_cache(maxsize=1)
+def _get_model_cached():
+    if not (KOKORO_CONFIG and KOKORO_MODEL):
+        return True
+    from kokoro.model import KModel
+    logger.info(f"Loading Kokoro model files config={KOKORO_CONFIG} model={KOKORO_MODEL}")
+    return KModel(
+        repo_id=KOKORO_REPO_ID,
+        config=KOKORO_CONFIG,
+        model=KOKORO_MODEL,
+    ).to(KOKORO_DEVICE).eval()
+
+
 @lru_cache(maxsize=2)
 def _get_pipeline_cached(lang_code: str):
     """Cached pipeline — one per language code (a=American, b=British)."""
     from kokoro import KPipeline
-    logger.info(f"Loading Kokoro pipeline lang_code={lang_code}")
-    return KPipeline(lang_code=lang_code)
+    logger.info(f"Loading Kokoro pipeline lang_code={lang_code} repo_id={KOKORO_REPO_ID}")
+    return KPipeline(
+        lang_code=lang_code,
+        repo_id=KOKORO_REPO_ID,
+        model=_get_model_cached(),
+        device=KOKORO_DEVICE,
+    )
 
 
 def _get_pipeline(lang_code: str):

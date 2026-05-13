@@ -24,12 +24,14 @@ POST /api/voice/speak
                   JSON array of `{word, start_ms, end_ms}` for live highlight.
 """
 import base64
+import io
 import json
 import logging
 import time
 
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+import soundfile as sf
 
 from app.utils.audio import AudioError, preprocess
 from app.utils.voice_store import (
@@ -125,6 +127,87 @@ def _ascii_safe_header(value: str, limit: int = 200) -> str:
     return snippet.encode("ascii", "ignore").decode("ascii")
 
 
+def _estimate_word_timings(text: str, duration_ms: int) -> list[dict]:
+    words = text.split()
+    if not words:
+        return []
+    weights = [max(1, len("".join(ch for ch in word if ch.isalpha()))) for word in words]
+    total = sum(weights) or len(words)
+    cursor = 0.0
+    timings = []
+    for word, weight in zip(words, weights):
+        span = duration_ms * (weight / total)
+        start = cursor
+        cursor += span
+        timings.append({"word": word, "start_ms": round(start), "end_ms": round(cursor)})
+    return timings
+
+
+def _encode_word_timings(words: list[dict]) -> str:
+    return base64.b64encode(
+        json.dumps(words, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+
+
+def _voice_headers(
+    *,
+    text: str,
+    accent: str,
+    strategy: str,
+    mode: str,
+    emotion: str,
+    words: list[dict],
+    emotion_source: str,
+    detected_label: str = "",
+    detected_score: float = 0.0,
+) -> dict[str, str]:
+    headers = {
+        "X-Target-Text": _ascii_safe_header(text),
+        "X-Accent": accent,
+        "X-Voice-Strategy": strategy,
+        "X-Voice-Mode": mode,
+        "X-Voice-Emotion": emotion,
+        "X-Word-Timings": _encode_word_timings(words),
+        "Access-Control-Expose-Headers": (
+            "X-Target-Text, X-Accent, X-Voice-Strategy, X-Voice-Mode, "
+            "X-Voice-Emotion, X-Voice-Emotion-Source, "
+            "X-Voice-Emotion-Raw, X-Voice-Emotion-Score, X-Word-Timings"
+        ),
+        "X-Voice-Emotion-Source": emotion_source,
+    }
+    if emotion_source == "auto":
+        headers["X-Voice-Emotion-Raw"] = detected_label or "neutral"
+        headers["X-Voice-Emotion-Score"] = f"{detected_score:.3f}"
+    return headers
+
+
+def _kokoro_fallback_response(text: str, accent: str, strategy: str, emotion: str) -> Response:
+    from app.api.tts import VOICE_MAP, _synthesize
+
+    if accent not in VOICE_MAP:
+        accent = "GA"
+    lang_code, voice = VOICE_MAP[accent]
+    wav_bytes = _synthesize(text, lang_code, voice, 0.9)
+    try:
+        duration_ms = int(round(sf.info(io.BytesIO(wav_bytes)).duration * 1000))
+    except Exception:
+        duration_ms = max(500, len(text.split()) * 380)
+    words = _estimate_word_timings(text, duration_ms)
+    return Response(
+        content=wav_bytes,
+        media_type="audio/wav",
+        headers=_voice_headers(
+            text=text,
+            accent=accent,
+            strategy=strategy,
+            mode="kokoro_fallback",
+            emotion=emotion,
+            words=words,
+            emotion_source="manual",
+        ),
+    )
+
+
 @router.post("/voice/speak")
 async def speak(
     request: Request,
@@ -145,16 +228,14 @@ async def speak(
         )
 
     voice_clone = getattr(request.app.state, "voice_clone", None)
-    if voice_clone is None:
-        raise HTTPException(status_code=503, detail="Voice cloning engine not loaded.")
-    if accent not in voice_clone.supported_accents():
+    emotion_input = (emotion or "neutral").lower()
+    detected_label = ""
+    detected_score = 0.0
+    if voice_clone is not None and accent not in voice_clone.supported_accents():
         raise HTTPException(
             status_code=400,
             detail=f"Accent '{accent}' not supported. Choose: {voice_clone.supported_accents()}",
         )
-    emotion_input = (emotion or "neutral").lower()
-    detected_label = ""
-    detected_score = 0.0
     if emotion_input == "auto":
         detector = getattr(request.app.state, "emotion_detector", None)
         if detector is None:
@@ -165,7 +246,7 @@ async def speak(
                 f"voice/speak auto-emotion: raw={detected_label} "
                 f"score={detected_score:.2f} → {emotion}"
             )
-    elif emotion_input not in voice_clone.supported_emotions():
+    elif voice_clone is not None and emotion_input not in voice_clone.supported_emotions():
         raise HTTPException(
             status_code=400,
             detail=f"Emotion '{emotion}' not supported. Choose: {voice_clone.supported_emotions()} or 'auto'",
@@ -184,6 +265,20 @@ async def speak(
         )
 
     t0 = time.perf_counter()
+    if voice_clone is None:
+        try:
+            response = _kokoro_fallback_response(text, accent, strategy, emotion)
+        except Exception as e:
+            logger.exception(f"Kokoro fallback synthesis failed: {e}")
+            raise HTTPException(status_code=500, detail="Voice synthesis failed.")
+        elapsed = round((time.perf_counter() - t0) * 1000)
+        logger.info(
+            f"voice/speak {user_id[:6]}… → {accent} (kokoro_fallback) "
+            f"| '{text[:40]}…' | {elapsed}ms "
+            f"(voice clone unavailable; ref bundle {info.get('bundle_duration_s', 0):.1f}s)"
+        )
+        return response
+
     try:
         result = voice_clone.speak(
             text=text,
@@ -204,33 +299,18 @@ async def speak(
         f"{len(info.get('takes', []))} takes, {len(result.words)} words)"
     )
 
-    # Pack word timings into a single header. Base64 keeps the value
-    # header-safe and compact for the typical 50–80 word outputs.
-    words_b64 = base64.b64encode(
-        json.dumps(result.words, separators=(",", ":")).encode("utf-8")
-    ).decode("ascii")
-
-    headers = {
-        "X-Target-Text": _ascii_safe_header(text),
-        "X-Accent": accent,
-        "X-Voice-Strategy": result.strategy,
-        "X-Voice-Mode": result.mode,
-        "X-Voice-Emotion": emotion,
-        "X-Word-Timings": words_b64,
-        "Access-Control-Expose-Headers": (
-            "X-Target-Text, X-Accent, X-Voice-Strategy, X-Voice-Mode, "
-            "X-Voice-Emotion, X-Voice-Emotion-Source, "
-            "X-Voice-Emotion-Raw, X-Voice-Emotion-Score, X-Word-Timings"
-        ),
-    }
-    if emotion_input == "auto":
-        headers["X-Voice-Emotion-Source"] = "auto"
-        headers["X-Voice-Emotion-Raw"] = detected_label or "neutral"
-        headers["X-Voice-Emotion-Score"] = f"{detected_score:.3f}"
-    else:
-        headers["X-Voice-Emotion-Source"] = "manual"
     return FileResponse(
         path=str(result.path),
         media_type="audio/wav",
-        headers=headers,
+        headers=_voice_headers(
+            text=text,
+            accent=accent,
+            strategy=result.strategy,
+            mode=result.mode,
+            emotion=emotion,
+            words=result.words,
+            emotion_source="auto" if emotion_input == "auto" else "manual",
+            detected_label=detected_label,
+            detected_score=detected_score,
+        ),
     )

@@ -18,9 +18,9 @@ import time
 
 import numpy as np
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
-from app.api.voice_enroll import _ascii_safe_header
+from app.api.voice_enroll import _estimate_word_timings, _voice_headers
 from app.utils.audio import AudioError, preprocess
 from app.utils.voice_store import VoiceStoreError, get_enrollment
 
@@ -43,18 +43,14 @@ async def accent_clone(
 
     voice_clone = getattr(request.app.state, "voice_clone", None)
     whisper = getattr(request.app.state, "whisper", None)
-    if voice_clone is None:
-        raise HTTPException(status_code=503, detail="Voice cloning engine not loaded.")
-    if whisper is None:
-        raise HTTPException(status_code=503, detail="Transcription engine not loaded.")
 
-    if accent not in voice_clone.supported_accents():
+    if voice_clone is not None and accent not in voice_clone.supported_accents():
         raise HTTPException(
             status_code=400,
             detail=f"Accent '{accent}' not supported. Choose: {voice_clone.supported_accents()}",
         )
     emotion_input = (emotion or "neutral").lower()
-    if emotion_input != "auto" and emotion_input not in voice_clone.supported_emotions():
+    if voice_clone is not None and emotion_input != "auto" and emotion_input not in voice_clone.supported_emotions():
         raise HTTPException(
             status_code=400,
             detail=f"Emotion '{emotion}' not supported. Choose: {voice_clone.supported_emotions()} or 'auto'",
@@ -75,6 +71,8 @@ async def accent_clone(
     # risk of transcription errors. Otherwise Whisper handles it.
     target_text = override_text.strip()
     if not target_text:
+        if whisper is None:
+            raise HTTPException(status_code=503, detail="Transcription engine not loaded.")
         try:
             raw = await audio.read()
             wav, _ = preprocess(raw)
@@ -113,6 +111,39 @@ async def accent_clone(
             )
 
     t0 = time.perf_counter()
+    if voice_clone is None:
+        try:
+            from app.api.tts import VOICE_MAP, _synthesize
+
+            if accent not in VOICE_MAP:
+                accent = "GA"
+            lang_code, voice = VOICE_MAP[accent]
+            wav_bytes = _synthesize(target_text, lang_code, voice, 0.9)
+        except Exception as e:
+            logger.exception(f"Kokoro accent fallback failed: {e}")
+            raise HTTPException(status_code=500, detail="Accent clone failed.")
+        elapsed = round((time.perf_counter() - t0) * 1000)
+        words = _estimate_word_timings(target_text, max(500, len(target_text.split()) * 380))
+        logger.info(
+            f"Accent clone {user_id[:6]}… → {accent} (kokoro_fallback) "
+            f"| '{target_text[:40]}…' | {elapsed}ms"
+        )
+        return Response(
+            content=wav_bytes,
+            media_type="audio/wav",
+            headers=_voice_headers(
+                text=target_text,
+                accent=accent,
+                strategy="target_accent",
+                mode="kokoro_fallback",
+                emotion=resolved_emotion,
+                words=words,
+                emotion_source="auto" if emotion_input == "auto" else "manual",
+                detected_label=detected_label,
+                detected_score=detected_score,
+            ),
+        )
+
     try:
         result = voice_clone.speak(
             text=target_text,
@@ -131,31 +162,18 @@ async def accent_clone(
         f"| '{target_text[:40]}…' | {elapsed}ms | {len(result.words)} words"
     )
 
-    import base64, json as _json
-    words_b64 = base64.b64encode(
-        _json.dumps(result.words, separators=(",", ":")).encode("utf-8")
-    ).decode("ascii")
-
-    headers = {
-        "X-Target-Text": _ascii_safe_header(target_text),
-        "X-Voice-Strategy": result.strategy,
-        "X-Voice-Mode": result.mode,
-        "X-Voice-Emotion": resolved_emotion,
-        "X-Word-Timings": words_b64,
-        "Access-Control-Expose-Headers": (
-            "X-Target-Text, X-Voice-Strategy, X-Voice-Mode, "
-            "X-Voice-Emotion, X-Voice-Emotion-Source, "
-            "X-Voice-Emotion-Raw, X-Voice-Emotion-Score, X-Word-Timings"
-        ),
-    }
-    if emotion_input == "auto":
-        headers["X-Voice-Emotion-Source"] = "auto"
-        headers["X-Voice-Emotion-Raw"] = detected_label or "neutral"
-        headers["X-Voice-Emotion-Score"] = f"{detected_score:.3f}"
-    else:
-        headers["X-Voice-Emotion-Source"] = "manual"
     return FileResponse(
         path=str(result.path),
         media_type="audio/wav",
-        headers=headers,
+        headers=_voice_headers(
+            text=target_text,
+            accent=accent,
+            strategy=result.strategy,
+            mode=result.mode,
+            emotion=resolved_emotion,
+            words=result.words,
+            emotion_source="auto" if emotion_input == "auto" else "manual",
+            detected_label=detected_label,
+            detected_score=detected_score,
+        ),
     )
