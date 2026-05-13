@@ -11,6 +11,7 @@
   :root {
     color-scheme: dark;
     --bg:    #0A0A0B;
+    --panel: #111114;
     --fg:    #E8E8EA;
     --fg-2:  #9A9AA0;
     --fg-3:  #5F5F66;
@@ -36,7 +37,7 @@
   }
 
   main {
-    max-width: 680px;
+    max-width: 760px;
     margin: 0 auto;
     padding: 120px 28px 160px;
     opacity: 0;
@@ -44,14 +45,9 @@
     animation: enter 360ms var(--ease) forwards;
     animation-delay: 60ms;
   }
+  @keyframes enter { to { opacity: 1; transform: translateY(0); } }
 
-  @keyframes enter {
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  header {
-    margin-bottom: 96px;
-  }
+  header { margin-bottom: 80px; }
 
   .kicker {
     display: inline-flex;
@@ -78,24 +74,34 @@
     letter-spacing: -0.022em;
     line-height: 1.2;
   }
+  h1 + p {
+    margin: 14px 0 0;
+    max-width: 56ch;
+    color: var(--fg-2);
+    font-size: 15px;
+  }
 
   h2 {
-    margin: 80px 0 28px;
+    margin: 80px 0 12px;
     font-size: 12px;
     font-weight: 500;
     color: var(--fg-3);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
+  h2 + .lede {
+    margin: 0 0 28px;
+    max-width: 56ch;
+    color: var(--fg-2);
+    font-size: 14px;
+  }
 
-  .clip {
-    padding: 22px 0 26px;
+  article.clip {
+    padding: 24px 0 28px;
     border-bottom: 1px solid var(--line);
   }
-  .clip:last-of-type { border-bottom: 0; }
-  .clip:target {
-    /* Subtle anchor highlight; fades after a moment.
-       :target makes the linked-to clip recognisable without flashing. */
+  article.clip:last-of-type { border-bottom: 0; }
+  article.clip:target {
     animation: target-pulse 1200ms var(--ease);
   }
   @keyframes target-pulse {
@@ -110,14 +116,21 @@
     gap: 16px;
     margin-bottom: 10px;
   }
-
   .clip-title {
     font-size: 15px;
     font-weight: 500;
     color: var(--fg);
     letter-spacing: -0.005em;
   }
-
+  .clip-title small {
+    display: block;
+    margin-top: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
   .clip-meta {
     font-size: 12px;
     color: var(--fg-3);
@@ -137,36 +150,46 @@
     height: 36px;
     border-radius: 10px;
   }
-  audio::-webkit-media-controls-panel {
-    background-color: #141417;
-  }
+  audio::-webkit-media-controls-panel { background-color: #141417; }
 
-  .hero {
-    display: grid;
-    gap: 16px;
-    grid-template-columns: 1fr;
-    margin-top: 28px;
-  }
-  @media (min-width: 720px) {
-    .hero { grid-template-columns: 1fr 1fr; gap: 14px; }
-  }
-  .hero .clip {
-    padding: 18px 18px 20px;
+  /* Behind-the-scenes panel */
+  .bts {
+    margin: 16px 0 0;
+    padding: 14px 16px;
+    background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 14px;
-    transition: border-color 220ms var(--ease);
+    border-radius: 10px;
+    display: grid;
+    grid-template-columns: 132px 1fr;
+    gap: 6px 18px;
   }
-  @media (hover: hover) and (pointer: fine) {
-    .hero .clip:hover { border-color: #2D2A3A; }
-  }
-  .hero .clip-title small {
-    display: block;
-    margin-top: 2px;
+  .bts dt {
     font-size: 11px;
     font-weight: 500;
-    color: var(--accent);
-    letter-spacing: 0.06em;
+    color: var(--fg-3);
     text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0;
+    padding-top: 2px;
+  }
+  .bts dd {
+    margin: 0;
+    font-size: 13px;
+    color: var(--fg-2);
+    line-height: 1.5;
+  }
+  .bts dd code, .bts dd kbd {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    background: rgba(184, 156, 255, 0.08);
+    color: var(--fg);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  @media (max-width: 560px) {
+    .bts { grid-template-columns: 1fr; gap: 4px 0; }
+    .bts dt { margin-top: 10px; }
+    .bts dt:first-child { margin-top: 0; }
   }
 
   footer {
@@ -186,7 +209,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     main { animation: none; opacity: 1; transform: none; }
-    .clip:target { animation: none; }
+    article.clip:target { animation: none; }
     * { transition-duration: 0ms !important; }
   }
 </style>
@@ -196,87 +219,74 @@
 
 <header>
   <a class="kicker" href="https://github.com/vikranthreddimasu/PronounceAI#readme">PronounceAI</a>
-  <h1>Samples produced by the pipeline.</h1>
+  <h1>One enrolment, two accents, one identity.</h1>
+  <p>Below: the same person's voice rendered three ways. The original 10-second enrolment, then the same speaker reading sentences they never recorded — in General American, then in Received Pronunciation. Every clip is a real artifact from the pipeline in this repository.</p>
 </header>
 
 <h2>Voice clone</h2>
-<div class="hero">
-  <article class="clip" id="user-original">
-    <div class="clip-head">
-      <div class="clip-title">Maintainer's voice<small>Enrolment</small></div>
-      <div class="clip-meta">13.1 s · WAV</div>
-    </div>
-    <p class="quote">"Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river…"</p>
-    <audio controls preload="metadata" src="samples/voice_user_original.wav"></audio>
-  </article>
-  <article class="clip" id="user-clone-ga">
-    <div class="clip-head">
-      <div class="clip-title">Same speaker, GA<small>CosyVoice 3 VC</small></div>
-      <div class="clip-meta">11.2 s · WAV</div>
-    </div>
-    <p class="quote">"The renewable energy transition will define the next half-century, and the engineers who solve the storage problem will reshape every industry from agriculture to artificial intelligence."</p>
-    <audio controls preload="metadata" src="samples/voice_user_clone_ga.wav"></audio>
-  </article>
-</div>
+<p class="lede">The first clip is the only audio the system has of the speaker. Everything after is generated.</p>
 
-<h2>Emotion · accent variants</h2>
-
-<article class="clip" id="happy-ga">
+<article class="clip" id="user-original">
   <div class="clip-head">
-    <div class="clip-title">Happy · GA</div>
-    <div class="clip-meta">CosyVoice 3</div>
+    <div class="clip-title">Original enrolment<small>raw 16 kHz · 13.1 s</small></div>
+    <div class="clip-meta">unprocessed</div>
   </div>
-  <p class="quote">"I just got promoted today. I am so excited for the future!"</p>
-  <audio controls preload="metadata" src="samples/voice_happy_ga.wav"></audio>
+  <p class="quote">"Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river…"</p>
+  <audio controls preload="metadata" src="samples/voice_user_original.wav"></audio>
+  <dl class="bts">
+    <dt>Why this clip</dt>
+    <dd>Recorded once in the browser via <code>MediaRecorder</code>. It is the entire body of evidence the model has about how this person sounds.</dd>
+    <dt>What it drives</dt>
+    <dd>Both the speaker embedding (timbre fingerprint) and the prompt mel-spectrogram (style anchor) CosyVoice 3 conditions on when generating every clip below.</dd>
+  </dl>
 </article>
 
-<article class="clip" id="sad-rp">
+<article class="clip" id="user-clone-ga">
   <div class="clip-head">
-    <div class="clip-title">Sad · RP</div>
-    <div class="clip-meta">CosyVoice 3</div>
+    <div class="clip-title">Same speaker — General American<small>CosyVoice 3 VC · 11.2 s</small></div>
+    <div class="clip-meta">never recorded by speaker</div>
   </div>
-  <p class="quote">"The old photograph brought back so many precious memories."</p>
-  <audio controls preload="metadata" src="samples/voice_sad_rp.wav"></audio>
+  <p class="quote">"The renewable energy transition will define the next half-century, and the engineers who solve the storage problem will reshape every industry from agriculture to artificial intelligence."</p>
+  <audio controls preload="metadata" src="samples/voice_user_clone_ga.wav"></audio>
+  <dl class="bts">
+    <dt>Pipeline</dt>
+    <dd>Text → Kokoro 82 M renders it in <code>af_heart</code> (American female, 24 kHz) → CosyVoice 3 voice-converts that source to match the original speaker's timbre.</dd>
+    <dt>Why VC, not zero-shot</dt>
+    <dd>VC mode is deterministic for accent: the Kokoro source already carries the target accent, so the output cannot drift. Zero-shot mode preserves the enrolment accent and is reserved for <code>strategy=natural</code>.</dd>
+    <dt>Validation</dt>
+    <dd>Whisper re-transcribes the output. This clip passed at <code>coverage 1.0 · char-similarity 1.0 · length-ratio 1.0</code> — every word landed where it was supposed to.</dd>
+  </dl>
 </article>
 
-<article class="clip" id="angry-ga">
+<article class="clip" id="user-clone-rp">
   <div class="clip-head">
-    <div class="clip-title">Angry · GA</div>
-    <div class="clip-meta">CosyVoice 3</div>
+    <div class="clip-title">Same speaker — Received Pronunciation<small>CosyVoice 3 VC · 8.7 s</small></div>
+    <div class="clip-meta">never recorded by speaker</div>
   </div>
-  <p class="quote">"This is completely unacceptable. I demand to speak to the manager."</p>
-  <audio controls preload="metadata" src="samples/voice_angry_ga.wav"></audio>
-</article>
-
-<article class="clip" id="calm-rp">
-  <div class="clip-head">
-    <div class="clip-title">Calm · RP</div>
-    <div class="clip-meta">CosyVoice 3</div>
-  </div>
-  <p class="quote">"Close your eyes. Breathe in slowly. Let the tension fade away."</p>
-  <audio controls preload="metadata" src="samples/voice_calm_rp.wav"></audio>
-</article>
-
-<article class="clip" id="whisper-ga">
-  <div class="clip-head">
-    <div class="clip-title">Whisper · GA</div>
-    <div class="clip-meta">CosyVoice 3</div>
-  </div>
-  <p class="quote">"I need to tell you a secret, but you must promise not to tell anyone."</p>
-  <audio controls preload="metadata" src="samples/voice_whisper_ga.wav"></audio>
+  <p class="quote">"Yesterday the rain set in well before dawn, and by the time I reached the station the platform was already silver with water. I bought a paper and waited."</p>
+  <audio controls preload="metadata" src="samples/voice_user_clone_rp.wav"></audio>
+  <dl class="bts">
+    <dt>Pipeline</dt>
+    <dd>Identical to the GA clip — only the Kokoro voice changes (<code>bf_emma</code>, British RP female). The speaker enrolment fed into CosyVoice 3 is the same file.</dd>
+    <dt>What this shows</dt>
+    <dd>Accent control is a property of the source audio, not the speaker. Swap the Kokoro voice and the output accent follows; the speaker stays recognisably the same person.</dd>
+    <dt>Validation</dt>
+    <dd><code>coverage 1.0 · char-similarity 1.0 · length-ratio 1.0</code>.</dd>
+  </dl>
 </article>
 
 <h2>Native references</h2>
+<p class="lede">Kokoro 82 M reference audio. Drives the pitch overlay in the scorer and the "hear native" button in the practice UI.</p>
 
 <article class="clip" id="tts-ship">
   <div class="clip-head">
     <div class="clip-title">Ship or sheep?</div>
-    <div class="clip-meta">Kokoro 82M · GA</div>
+    <div class="clip-meta">GA</div>
   </div>
   <audio controls preload="metadata" src="samples/tts_ga_ship_or_sheep.wav"></audio>
   <div class="clip-head" style="margin-top: 18px;">
     <div class="clip-title">Ship or sheep?</div>
-    <div class="clip-meta">Kokoro 82M · RP</div>
+    <div class="clip-meta">RP</div>
   </div>
   <audio controls preload="metadata" src="samples/tts_rp_ship_or_sheep.wav"></audio>
 </article>
@@ -284,7 +294,7 @@
 <article class="clip" id="tts-seashells">
   <div class="clip-head">
     <div class="clip-title">She sells seashells by the seashore.</div>
-    <div class="clip-meta">Kokoro 82M · GA</div>
+    <div class="clip-meta">GA</div>
   </div>
   <audio controls preload="metadata" src="samples/tts_ga_seashells.wav"></audio>
 </article>
@@ -292,7 +302,7 @@
 <article class="clip" id="tts-fox">
   <div class="clip-head">
     <div class="clip-title">The quick brown fox jumps over the lazy dog.</div>
-    <div class="clip-meta">Kokoro 82M · GA</div>
+    <div class="clip-meta">GA</div>
   </div>
   <audio controls preload="metadata" src="samples/tts_ga_quick_brown_fox.wav"></audio>
 </article>
@@ -300,7 +310,7 @@
 <article class="clip" id="tts-route">
   <div class="clip-head">
     <div class="clip-title">Could you show me the fastest route to the station?</div>
-    <div class="clip-meta">Kokoro 82M · RP</div>
+    <div class="clip-meta">RP</div>
   </div>
   <audio controls preload="metadata" src="samples/tts_rp_fastest_route.wav"></audio>
 </article>

@@ -14,9 +14,9 @@
 
 ## Hear it before you read about it
 
-A learner records ten seconds. The pipeline then renders the same speaker, in General American, saying a long sentence they never spoke. Identity preserved. New sentence. Target accent locked in.
+A learner records ten seconds. The pipeline then renders the same speaker in **two different accents**, reading sentences they never recorded. Identity preserved. New sentences. Target accent — General American or Received Pronunciation — locked in by the source audio, not by the speaker.
 
-→ **[Listen to the side-by-side comparison](https://vikranthreddimasu.github.io/PronounceAI/#user-clone-ga)** in the sample gallery.
+→ **[Listen to the three-clip comparison](https://vikranthreddimasu.github.io/PronounceAI/#user-original)** (original · GA clone · RP clone, with behind-the-scenes notes per clip).
 
 ---
 
@@ -80,11 +80,11 @@ flowchart LR
 
 ## What you get
 
-### 1 · Voice cloning across emotions and accents
+### 1 · Voice cloning with accent control
 
-CosyVoice 3 voice conversion. The learner records once. The same speaker can be rendered across emotional styles (happy, sad, angry, calm, whisper) in both General American and Received Pronunciation.
+CosyVoice 3 voice conversion. The learner records once. The same speaker is then rendered in either General American or Received Pronunciation — accent comes from the Kokoro-rendered source audio, so it is deterministic; speaker identity comes from the enrolment, so it stays put.
 
-→ **[Listen to the variants in the sample gallery](https://vikranthreddimasu.github.io/PronounceAI/#happy-ga)**.
+→ **[Listen to the three-clip comparison](https://vikranthreddimasu.github.io/PronounceAI/#user-original)** (original · GA clone · RP clone, with pipeline notes per clip).
 
 ### 2 · Pronunciation scoring
 
