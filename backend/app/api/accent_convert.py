@@ -6,6 +6,7 @@ Returns: audio/wav — the same words spoken in the target accent (kNN-VC).
 """
 import io
 import logging
+import asyncio
 
 import numpy as np
 import soundfile as sf
@@ -20,6 +21,31 @@ router = APIRouter()
 OUTPUT_SR = 16_000
 
 
+async def _get_converter(request: Request):
+    converter = getattr(request.app.state, "accent_converter", None)
+    if converter is not None:
+        return converter
+
+    lock = getattr(request.app.state, "accent_converter_lock", None)
+    if lock is None:
+        request.app.state.accent_converter_lock = asyncio.Lock()
+        lock = request.app.state.accent_converter_lock
+
+    async with lock:
+        converter = getattr(request.app.state, "accent_converter", None)
+        if converter is not None:
+            return converter
+        try:
+            from app.models.accent_converter import AccentConverter
+            converter = await asyncio.to_thread(AccentConverter, device="cpu")
+            request.app.state.accent_converter = converter
+            logger.info("Accent converter lazy-loaded")
+            return converter
+        except Exception as e:
+            logger.exception("Accent converter lazy-load failed: %s", e)
+            raise HTTPException(status_code=503, detail="Accent converter unavailable")
+
+
 @router.post("/accent-convert")
 async def accent_convert(
     request: Request,
@@ -27,9 +53,7 @@ async def accent_convert(
     accent: str = Form("GA"),
 ):
     accent = accent.upper()
-    converter = getattr(request.app.state, "accent_converter", None)
-    if converter is None:
-        raise HTTPException(status_code=503, detail="Accent converter not loaded")
+    converter = await _get_converter(request)
     if accent not in converter.supported_accents():
         raise HTTPException(
             status_code=400,

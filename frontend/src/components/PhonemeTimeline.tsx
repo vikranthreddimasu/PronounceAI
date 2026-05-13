@@ -6,8 +6,8 @@ type Props = { phonemes: PhonemeResult[] };
 
 function gopColor(gop: number): string {
   if (gop > -1.0) return "var(--jade)";
-  if (gop > -2.0) return "var(--accent)";
-  return "var(--rose)";
+  if (gop > -2.0) return "var(--ink)";
+  return "var(--accent)";
 }
 
 function gopLabel(gop: number): string {
@@ -20,9 +20,9 @@ export default function PhonemeTimeline({ phonemes }: Props) {
   if (phonemes.length === 0) return null;
 
   return (
-    <div className="result-enter w-full">
-      <p className="mb-3 text-xs font-medium uppercase tracking-widest" style={{ color: "var(--ink-4)" }}>
-        Phoneme timeline
+    <div className="result-enter w-full" style={{ borderTop: "1px solid var(--rule)", paddingTop: 14 }}>
+      <p className="eyebrow" style={{ marginBottom: 12 }}>
+        Phoneme Timeline
       </p>
 
       {/* Scrollable horizontal strip */}
@@ -47,19 +47,20 @@ export default function PhonemeTimeline({ phonemes }: Props) {
                   : `/${p.phoneme}/: ${label}`
               }
             >
-              {/* Color pip */}
               <span
-                className="phoneme-pip flex items-center justify-center rounded"
+                className="phoneme-pip flex items-center justify-center"
                 style={{
-                  width: 28, height: 28,
-                  background: color + "22",
-                  border: `1.5px solid ${color}`,
+                  width: 30, height: 30,
+                  background: "transparent",
+                  border: `1px solid ${color}`,
+                  borderRadius: 0,
+                  fontFamily: "var(--type-mono)",
                   fontSize: 11,
-                  fontFamily: "var(--type-sans)",
                   color: color,
                   fontWeight: 600,
+                  letterSpacing: 0,
                   lineHeight: 1,
-                  transition: "transform 180ms var(--ease-out), background 180ms var(--ease-out)",
+                  transition: "transform 180ms var(--ease-out), background-color 180ms var(--ease-out)",
                   cursor: "pointer",
                 }}
               >
@@ -78,16 +79,25 @@ export default function PhonemeTimeline({ phonemes }: Props) {
       </div>
 
       {/* Legend */}
-      <div className="flex gap-4 mt-1" style={{ fontSize: 11, color: "var(--ink-4)" }}>
+      <div
+        className="flex gap-4 mt-1"
+        style={{
+          fontFamily: "var(--type-mono)",
+          fontSize: 10,
+          color: "var(--ink-4)",
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+        }}
+      >
         {[
           { color: "var(--jade)", label: "Correct" },
-          { color: "var(--accent)", label: "Marginal" },
-          { color: "var(--rose)", label: "Needs work" },
+          { color: "var(--ink)", label: "Marginal" },
+          { color: "var(--accent)", label: "Needs work" },
         ].map(({ color, label }) => (
           <span key={label} className="flex items-center gap-1.5">
             <span
-              className="inline-block rounded-full"
-              style={{ width: 7, height: 7, background: color }}
+              className="inline-block"
+              style={{ width: 7, height: 7, background: color, borderRadius: 0 }}
             />
             {label}
           </span>

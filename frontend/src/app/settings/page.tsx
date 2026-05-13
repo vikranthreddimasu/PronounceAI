@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   getProfile,
   setProfile,
@@ -10,15 +10,16 @@ import {
   type Theme,
 } from "@/lib/store";
 import { isSoundsEnabled, setSoundsEnabled, tap, confirm } from "@/lib/sounds";
+import { isAbortError } from "@/lib/abortError";
 import {
-  fetchVoiceProfile,
-  getOrCreateVoiceId,
+  deleteCurrentVoiceProfile,
   deleteVoiceProfile,
   deleteVoiceTake,
-  ENROLLMENT_PROMPTS,
+  chooseEnrollmentPrompts,
+  refreshVoiceSession,
   type EnrollmentPrompt,
-  type VoiceProfile,
 } from "@/lib/voiceProfile";
+import { useVoiceSession } from "@/lib/useVoiceSession";
 import EnrollmentModal from "@/components/EnrollmentModal";
 import type { Accent } from "@/lib/types";
 
@@ -37,18 +38,28 @@ const ACCENT_OPTIONS: { id: Accent; label: string; desc: string }[] = [
 export default function SettingsPage() {
   const [profile, setLocal] = useState<UserProfile>(getProfile());
   const [sounds, setSounds] = useState(true);
-  const [voiceProfile, setVoice] = useState<VoiceProfile | null>(null);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [enrollPrompts, setEnrollPrompts] = useState<EnrollmentPrompt[] | undefined>(undefined);
   const [confirmReset, setConfirmReset] = useState(false);
+  const voiceSession = useVoiceSession();
+  const voiceProfile = voiceSession.profile;
+
+  const voiceMutateAbortRef = useRef<AbortController | null>(null);
+
+  const beginVoiceMutation = useCallback(() => {
+    voiceMutateAbortRef.current?.abort();
+    const ac = new AbortController();
+    voiceMutateAbortRef.current = ac;
+    return ac;
+  }, []);
+
+  useEffect(() => () => {
+    voiceMutateAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     setLocal(getProfile());
     setSounds(isSoundsEnabled());
-    const id = getOrCreateVoiceId();
-    if (id) {
-      fetchVoiceProfile(id).then(setVoice).catch(() => setVoice(null));
-    }
     return subscribeStorage(() => setLocal(getProfile()));
   }, []);
 
@@ -87,9 +98,9 @@ export default function SettingsPage() {
               onClick={() => update({ targetAccent: a.id })}
               style={{
                 padding: "14px 18px",
-                borderRadius: 12,
-                border: `1px solid ${profile.targetAccent === a.id ? "var(--accent)" : "var(--line)"}`,
-                background: profile.targetAccent === a.id ? "var(--accent-faint)" : "var(--paper)",
+                borderRadius: 0,
+                border: `1px solid ${profile.targetAccent === a.id ? "var(--ink)" : "var(--rule)"}`,
+                background: profile.targetAccent === a.id ? "var(--paper-2)" : "var(--paper)",
                 textAlign: "left",
                 display: "flex",
                 alignItems: "center",
@@ -100,14 +111,11 @@ export default function SettingsPage() {
               <span
                 aria-hidden
                 style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: "50%",
-                  border: `2px solid ${profile.targetAccent === a.id ? "var(--accent)" : "var(--line-2)"}`,
-                  background:
-                    profile.targetAccent === a.id
-                      ? "radial-gradient(circle, var(--accent) 0%, var(--accent) 40%, transparent 45%)"
-                      : "transparent",
+                  width: 14,
+                  height: 14,
+                  borderRadius: 0,
+                  border: `1px solid ${profile.targetAccent === a.id ? "var(--ink)" : "var(--ink-4)"}`,
+                  background: profile.targetAccent === a.id ? "var(--accent)" : "transparent",
                   flexShrink: 0,
                 }}
               />
@@ -134,11 +142,13 @@ export default function SettingsPage() {
           style={{
             width: "100%",
             padding: "12px 14px",
-            borderRadius: 10,
-            border: "1px solid var(--line)",
+            borderRadius: 0,
+            border: "1px solid var(--rule)",
             background: "var(--paper)",
-            color: "var(--ink-2)",
-            fontSize: 13,
+            color: "var(--ink)",
+            fontFamily: "var(--type-mono)",
+            fontSize: 12,
+            letterSpacing: "0.04em",
             outline: "none",
             appearance: "none",
           }}
@@ -153,9 +163,31 @@ export default function SettingsPage() {
       {/* Voice enrollment */}
       <Group
         title="Voice profile"
-        hint="Each take strengthens the speaker embedding. CosyVoice uses up to 28s of reference; more variety + length = harder to distinguish from real you."
+        hint="A short clean sample is enough to start. Add another take only when you want a stronger profile."
       >
-        {voiceProfile ? (
+        {voiceSession.status === "loading" ? (
+          <div className="flex flex-col" style={{ gap: 10 }}>
+            <p style={{ fontSize: 13, color: "var(--ink-2)" }}>
+              Checking the local backend for your saved voice profile...
+            </p>
+          </div>
+        ) : voiceSession.status === "error" ? (
+          <div className="flex flex-col" style={{ gap: 12 }}>
+            <p style={{ fontSize: 13, color: "var(--rose)" }}>
+              {voiceSession.error ?? "Could not check the voice profile."}
+            </p>
+            <button
+              className="btn-paper press"
+              onClick={() => {
+                tap();
+                refreshVoiceSession({ force: true }).catch(() => {});
+              }}
+              style={{ fontSize: 12 }}
+            >
+              Check again
+            </button>
+          </div>
+        ) : voiceProfile ? (
           <div className="flex flex-col" style={{ gap: 14 }}>
             <div className="flex items-end justify-between" style={{ gap: 12 }}>
               <div>
@@ -214,12 +246,17 @@ export default function SettingsPage() {
                     className="press"
                     onClick={async () => {
                       tap();
-                      const id = getOrCreateVoiceId();
+                      const id = voiceSession.userId;
+                      if (!id) return;
+                      const ac = beginVoiceMutation();
                       try {
-                        const next = await deleteVoiceTake(id, t.id);
-                        setVoice(next);
-                      } catch {
-                        /* surface as toast later */
+                        await deleteVoiceTake(id, t.id, { signal: ac.signal });
+                      } catch (e) {
+                        if (!isAbortError(e)) {
+                          /* surface as toast later */
+                        }
+                      } finally {
+                        if (voiceMutateAbortRef.current === ac) voiceMutateAbortRef.current = null;
                       }
                     }}
                     title="Delete take"
@@ -246,10 +283,7 @@ export default function SettingsPage() {
                 className="btn-paper btn-primary press"
                 onClick={() => {
                   tap();
-                  // Default: cycle through the next missing prompt(s)
-                  const usedTexts = new Set(voiceProfile.takes.map((t) => t.ref_text));
-                  const missing = ENROLLMENT_PROMPTS.filter((p) => !usedTexts.has(p.text));
-                  setEnrollPrompts(missing.length > 0 ? missing : ENROLLMENT_PROMPTS);
+                  setEnrollPrompts(chooseEnrollmentPrompts(voiceProfile));
                   setEnrollOpen(true);
                 }}
                 style={{ fontSize: 12 }}
@@ -260,9 +294,18 @@ export default function SettingsPage() {
                 className="btn-paper press"
                 onClick={async () => {
                   tap();
-                  const id = getOrCreateVoiceId();
-                  await deleteVoiceProfile(id);
-                  setVoice(null);
+                  const id = voiceSession.userId;
+                  if (!id) return;
+                  const ac = beginVoiceMutation();
+                  try {
+                    await deleteVoiceProfile(id, { signal: ac.signal });
+                  } catch (e) {
+                    if (!isAbortError(e)) {
+                      /* optional toast */
+                    }
+                  } finally {
+                    if (voiceMutateAbortRef.current === ac) voiceMutateAbortRef.current = null;
+                  }
                 }}
                 style={{ fontSize: 12, color: "var(--rose)" }}
               >
@@ -273,7 +316,7 @@ export default function SettingsPage() {
         ) : (
           <div className="flex flex-col" style={{ gap: 12 }}>
             <p style={{ fontSize: 13, color: "var(--ink-2)" }}>
-              Not enrolled yet. 3 short takes (~30s total).
+              Not enrolled yet. Record one short clean sample.
             </p>
             <button
               className="btn-paper btn-primary press"
@@ -313,12 +356,15 @@ export default function SettingsPage() {
           onClick={toggleSounds}
           style={{
             padding: "12px 16px",
-            borderRadius: 12,
-            border: "1px solid var(--line)",
-            background: sounds ? "var(--accent-faint)" : "var(--paper)",
-            color: sounds ? "var(--accent)" : "var(--ink-3)",
-            fontSize: 13,
-            fontWeight: 600,
+            borderRadius: 0,
+            border: `1px solid ${sounds ? "var(--ink)" : "var(--rule)"}`,
+            background: "var(--paper)",
+            color: "var(--ink)",
+            fontFamily: "var(--type-sans)",
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
@@ -331,25 +377,26 @@ export default function SettingsPage() {
           <span
             aria-hidden
             style={{
-              width: 36,
+              width: 40,
               height: 20,
-              borderRadius: 9999,
-              background: sounds ? "var(--accent)" : "var(--paper-3)",
+              borderRadius: 0,
+              border: "1px solid var(--ink)",
+              background: sounds ? "var(--ink)" : "transparent",
               position: "relative",
-              transition: "background 220ms var(--ease-paper)",
+              transition: "background-color 180ms var(--ease-out)",
             }}
           >
             <span
               style={{
                 position: "absolute",
                 top: 2,
-                left: sounds ? 18 : 2,
-                width: 16,
-                height: 16,
-                borderRadius: "50%",
-                background: "#fefaf0",
-                boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
-                transition: "left 220ms var(--ease-paper)",
+                left: 2,
+                width: 14,
+                height: 14,
+                borderRadius: 0,
+                background: sounds ? "var(--paper)" : "var(--ink)",
+                transform: sounds ? "translateX(20px)" : "translateX(0)",
+                transition: "transform 180ms var(--ease-out), background-color 180ms var(--ease-out)",
               }}
             />
           </span>
@@ -380,11 +427,20 @@ export default function SettingsPage() {
             </button>
             <button
               className="btn-paper press"
-              onClick={() => {
-                resetAll();
-                confirm();
-                setLocal(getProfile());
-                setConfirmReset(false);
+              onClick={async () => {
+                const ac = beginVoiceMutation();
+                try {
+                  await deleteCurrentVoiceProfile({ signal: ac.signal });
+                  if (ac.signal.aborted) return;
+                  resetAll();
+                  confirm();
+                  setLocal(getProfile());
+                  setConfirmReset(false);
+                } catch (e) {
+                  if (isAbortError(e)) return;
+                } finally {
+                  if (voiceMutateAbortRef.current === ac) voiceMutateAbortRef.current = null;
+                }
               }}
               style={{
                 fontSize: 12,
@@ -393,7 +449,7 @@ export default function SettingsPage() {
                 borderColor: "var(--rose)",
               }}
             >
-              Yes, wipe profile + sessions
+              Yes, wipe profile, voice + sessions
             </button>
           </div>
         )}
@@ -405,7 +461,7 @@ export default function SettingsPage() {
           setEnrollOpen(false);
           setEnrollPrompts(undefined);
         }}
-        onEnrolled={(p) => setVoice(p)}
+        onEnrolled={() => {}}
         prompts={enrollPrompts}
       />
     </main>

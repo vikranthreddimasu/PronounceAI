@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Accent } from "@/lib/types";
 import { convertAccent } from "@/lib/api";
-import { cloneAccent, type VoiceProfile } from "@/lib/voiceProfile";
+import { cloneAccent, speakInVoice, type VoiceProfile } from "@/lib/voiceProfile";
+import { isAbortError } from "@/lib/abortError";
 
 type Mode = "native" | "personal";
 
@@ -12,6 +13,8 @@ type Props = {
   accent: Accent;
   /** Profile loaded from /api/voice/<id>. Null when no enrollment. */
   voiceProfile: VoiceProfile | null;
+  /** Known target phrase; lets personal mode skip ASR and hit speculative voice cache. */
+  overrideText?: string;
   /** Triggered when the user wants to (re-)enroll. */
   onOpenEnrollment: () => void;
 };
@@ -28,7 +31,7 @@ const MODE_DESC: Record<Mode, { title: string; sub: string }> = {
   },
   personal: {
     title: "Your voice",
-    sub: "Words rendered in your own voice, with the target accent.",
+    sub: "Your timbre with the target accent locked in.",
   },
 };
 
@@ -36,6 +39,7 @@ export default function AccentConvertCard({
   userAudio,
   accent,
   voiceProfile,
+  overrideText,
   onOpenEnrollment,
 }: Props) {
   const [mode, setMode] = useState<Mode>(voiceProfile ? "personal" : "native");
@@ -44,42 +48,78 @@ export default function AccentConvertCard({
   const [convertedUrl, setConvertedUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mountedRef = useRef(true);
+  const convertAbortRef = useRef<AbortController | null>(null);
+  const convertedUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      convertAbortRef.current?.abort();
+      convertAbortRef.current = null;
+      if (convertedUrlRef.current) URL.revokeObjectURL(convertedUrlRef.current);
+    };
+  }, []);
 
   // Reset whenever inputs change.
   useEffect(() => {
+    convertAbortRef.current?.abort();
+    convertAbortRef.current = null;
     setState("idle");
     setErrorMsg(null);
     if (convertedUrl) {
       URL.revokeObjectURL(convertedUrl);
+      convertedUrlRef.current = null;
       setConvertedUrl(null);
     }
     setIsPlaying(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userAudio, accent, mode]);
 
+  useEffect(() => {
+    convertedUrlRef.current = convertedUrl;
+  }, [convertedUrl]);
+
   // If profile appears/disappears, sync mode reasonably.
   useEffect(() => {
     if (!voiceProfile && mode === "personal") setMode("native");
   }, [voiceProfile, mode]);
 
-  useEffect(() => () => {
-    if (convertedUrl) URL.revokeObjectURL(convertedUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleConvert = useCallback(async () => {
     if (!userAudio || state === "converting") return;
+    convertAbortRef.current?.abort();
+    const ac = new AbortController();
+    convertAbortRef.current = ac;
     setState("converting");
     setErrorMsg(null);
     try {
       let blob: Blob;
       if (mode === "personal") {
         if (!voiceProfile) throw new Error("Set up your voice first.");
-        blob = await cloneAccent(userAudio, accent, voiceProfile.user_id);
+        if (overrideText?.trim()) {
+          blob = (
+            await speakInVoice(
+              voiceProfile.user_id,
+              overrideText,
+              accent,
+              voiceProfile.revision,
+              "target_accent",
+              ac.signal
+            )
+          ).audio;
+        } else {
+          blob = await cloneAccent(userAudio, accent, voiceProfile.user_id, { signal: ac.signal });
+        }
       } else {
-        blob = await convertAccent(userAudio, accent);
+        blob = await convertAccent(userAudio, accent, { signal: ac.signal });
       }
+      if (!mountedRef.current || ac.signal.aborted) return;
       const url = URL.createObjectURL(blob);
+      if (convertedUrlRef.current && convertedUrlRef.current !== url) {
+        URL.revokeObjectURL(convertedUrlRef.current);
+      }
+      convertedUrlRef.current = url;
       setConvertedUrl(url);
       setState("ready");
       if (!audioRef.current) audioRef.current = new Audio();
@@ -89,10 +129,16 @@ export default function AccentConvertCard({
       setIsPlaying(true);
       audioRef.current.play().catch(() => setIsPlaying(false));
     } catch (e) {
+      if (!mountedRef.current || isAbortError(e)) {
+        if (mountedRef.current) setState("idle");
+        return;
+      }
       setErrorMsg((e as Error).message ?? "Could not convert");
       setState("error");
+    } finally {
+      if (convertAbortRef.current === ac) convertAbortRef.current = null;
     }
-  }, [userAudio, accent, mode, voiceProfile, state]);
+  }, [userAudio, accent, mode, voiceProfile, overrideText, state]);
 
   const handleReplay = useCallback(() => {
     if (!convertedUrl) return;
@@ -152,7 +198,7 @@ export default function AccentConvertCard({
               background: isPlaying ? "var(--surface-2)" : "var(--accent)",
               color: isPlaying ? "var(--ink-2)" : "var(--bg)",
               border: isPlaying ? "1px solid var(--line)" : "none",
-              transition: "all 220ms var(--ease-out)",
+              transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out)",
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
@@ -168,7 +214,6 @@ export default function AccentConvertCard({
                 borderTop: "5px solid transparent",
                 borderBottom: "5px solid transparent",
                 display: "inline-block",
-                animation: isPlaying ? "glyph-bob 1.4s ease-in-out infinite" : undefined,
               }}
             />
             {isPlaying ? "Playing" : "Replay"}
@@ -184,7 +229,7 @@ export default function AccentConvertCard({
               color: isConverting ? "var(--ink-3)" : "var(--bg)",
               border: isConverting ? "1px solid var(--line)" : "none",
               opacity: isConverting ? 0.85 : 1,
-              transition: "all 220ms var(--ease-out)",
+              transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), opacity 180ms var(--ease-out), border-color 180ms var(--ease-out)",
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
@@ -219,7 +264,7 @@ export default function AccentConvertCard({
           ? errorMsg
           : isConverting
           ? mode === "personal"
-            ? "Cloning your voice with the target accent..."
+            ? "Locking the target accent to your voice..."
             : "Mapping your speech into the target accent..."
           : isReady
           ? "Compare it with your original above."
@@ -237,7 +282,7 @@ export default function AccentConvertCard({
           onClick={() => setMode("native")}
         />
         <ModeBtn
-          label={voiceProfile ? "Your voice" : "Your voice"}
+          label={voiceProfile ? "Your voice" : "Set up voice"}
           active={mode === "personal"}
           onClick={() => {
             if (voiceProfile) setMode("personal");
@@ -261,7 +306,7 @@ export default function AccentConvertCard({
             color: "var(--ink-3)",
             fontSize: 12,
             fontWeight: 500,
-            transition: "all 200ms var(--ease-out)",
+            transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out)",
           }}
         >
           Set up your voice to hear this accent in your own timbre
@@ -291,7 +336,7 @@ function ModeBtn({
         background: active ? "var(--surface-2)" : "transparent",
         color: active ? "var(--ink)" : "var(--ink-4)",
         border: active ? "1px solid var(--line)" : "1px solid transparent",
-        transition: "all 220ms var(--ease-out)",
+        transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out)",
       }}
     >
       {label}

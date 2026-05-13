@@ -52,10 +52,6 @@ export default function SpokenText({ words, audio, playing, size = "md" }: Props
       while (idx + 1 < words.length && t >= words[idx + 1].start_ms) {
         idx++;
       }
-      if (idx >= 0 && t > words[idx].end_ms + 50 && idx + 1 < words.length && t < words[idx + 1].start_ms) {
-        // Between words: keep highlighting the just-spoken one
-        // (looks better than a flicker to "nothing").
-      }
       if (idx !== lastIdx) {
         lastIdx = idx;
         setActiveIdx(idx);
@@ -107,11 +103,12 @@ export default function SpokenText({ words, audio, playing, size = "md" }: Props
               style={{
                 color,
                 fontWeight: weight,
-                transition: "color 100ms var(--ease-out), font-weight 100ms var(--ease-out)",
+                transition: "color 140ms var(--ease-out)",
                 display: "inline",
               }}
             >
               {w.word}
+              {i < words.length - 1 ? " " : null}
             </span>
           );
         })}

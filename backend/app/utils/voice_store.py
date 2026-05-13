@@ -45,11 +45,14 @@ MAX_TAKE_S = 25.0
 # Quality gates
 MAX_PEAK = 0.985    # absolute peak above this = clipping
 MIN_RMS = 0.01      # below this = whisper / dead mic
+TARGET_RMS = 0.075  # consistent prompt loudness helps zero-shot cloning
 
 # Bundle target — CosyVoice 3 native rate, 30 s hard cap with margin
 TARGET_SR = 24_000
 BUNDLE_MAX_S = 28.0
 INTER_TAKE_SILENCE_MS = 200
+TRIM_PAD_MS = 120
+FADE_MS = 12
 
 
 class VoiceStoreError(ValueError):
@@ -152,18 +155,61 @@ def _quality_check(wav_16k_mono: np.ndarray, ref_text: str) -> dict:
     return {"duration_s": round(duration, 2), "peak": round(peak, 3), "rms": round(rms, 4)}
 
 
+def _condition_take(wav_16k_mono: np.ndarray) -> np.ndarray:
+    """Trim obvious silence and normalize prompt loudness before storage."""
+    wav = np.asarray(wav_16k_mono, dtype=np.float32).reshape(-1)
+    wav = np.nan_to_num(wav, nan=0.0, posinf=0.0, neginf=0.0)
+    if wav.size == 0:
+        return wav
+
+    raw_peak = float(np.abs(wav).max())
+    if raw_peak > MAX_PEAK:
+        raise VoiceStoreError(
+            f"Audio is clipping (peak {raw_peak:.3f}). Lower your input volume and re-record."
+        )
+
+    wav = wav - float(np.mean(wav))
+    peak = float(np.abs(wav).max())
+    if peak > 0:
+        threshold = max(0.006, peak * 0.04)
+        voiced = np.flatnonzero(np.abs(wav) >= threshold)
+        if voiced.size > 0:
+            pad = int(16_000 * TRIM_PAD_MS / 1000)
+            start = max(0, int(voiced[0]) - pad)
+            end = min(len(wav), int(voiced[-1]) + pad + 1)
+            wav = wav[start:end]
+
+    if wav.size == 0:
+        return wav
+
+    rms = float(np.sqrt(np.mean(np.square(wav))))
+    peak = float(np.abs(wav).max())
+    if rms > 1e-6 and peak > 0:
+        gain = TARGET_RMS / rms
+        gain = min(gain, 0.92 / peak)
+        wav = (wav * gain).astype(np.float32)
+
+    fade_n = min(int(16_000 * FADE_MS / 1000), len(wav) // 2)
+    if fade_n > 1:
+        fade = np.linspace(0.0, 1.0, fade_n, dtype=np.float32)
+        wav[:fade_n] *= fade
+        wav[-fade_n:] *= fade[::-1]
+    return wav.astype(np.float32)
+
+
 # ── Mutators ──────────────────────────────────────────────────────────
 
 def add_take(user_id: str, wav_16k_mono: np.ndarray, ref_text: str) -> dict:
     """Append a new take. Returns the take record."""
-    metrics = _quality_check(wav_16k_mono, ref_text)
+    conditioned = _condition_take(wav_16k_mono)
+    metrics = _quality_check(conditioned, ref_text)
     user_dir = _user_dir(user_id)
     user_dir.mkdir(parents=True, exist_ok=True)
 
     meta = _read_meta(user_id)
     take_id = _next_take_id(meta)
     take_path = user_dir / f"{take_id}.wav"
-    sf.write(str(take_path), wav_16k_mono.astype(np.float32), 16_000, subtype="PCM_16")
+    sf.write(str(take_path), conditioned, 16_000, subtype="PCM_16")
 
     take = {
         "id": take_id,
@@ -224,22 +270,97 @@ def delete_enrollment(user_id: str) -> bool:
 
 # ── Bundle (lazy) ─────────────────────────────────────────────────────
 
+def _take_quality_score(take: dict) -> float:
+    """
+    Rank takes by signal quality so the bundle picks the best within the 28s cap.
+
+    Components (higher = better):
+      • RMS proximity to TARGET_RMS — penalize too quiet AND too loud
+      • Peak headroom — penalize clipping risk (peak near 1.0)
+      • Duration sweet spot — 10-18s is ideal; very short or near MAX_TAKE_S loses
+      • Recency tiebreak — newest take wins ties so cleaner re-records replace old
+    """
+    rms = float(take.get("rms") or TARGET_RMS)
+    peak = float(take.get("peak") or 0.5)
+    duration = float(take.get("duration_s") or 0.0)
+    created_at = float(take.get("created_at") or 0.0)
+
+    # Distance from target RMS, scaled so 1 stop off = -0.4
+    rms_dist = abs(np.log2(max(rms, 1e-4) / TARGET_RMS))
+    rms_score = max(0.0, 1.0 - 0.4 * rms_dist)
+
+    # Peak: ideal 0.55-0.85, penalize beyond
+    if peak <= 0.0:
+        peak_score = 0.0
+    elif peak < 0.55:
+        peak_score = peak / 0.55
+    elif peak <= 0.85:
+        peak_score = 1.0
+    else:
+        peak_score = max(0.0, 1.0 - (peak - 0.85) / 0.13)
+
+    # Duration: 10-18s is ideal, taper outside
+    if duration <= 0:
+        dur_score = 0.0
+    elif 10.0 <= duration <= 18.0:
+        dur_score = 1.0
+    elif duration < 10.0:
+        dur_score = max(0.0, (duration - MIN_TAKE_S) / (10.0 - MIN_TAKE_S))
+    else:
+        dur_score = max(0.0, 1.0 - (duration - 18.0) / (MAX_TAKE_S - 18.0))
+
+    # Composite + tiny recency bonus (max 0.05 over a year)
+    base = 0.45 * rms_score + 0.30 * peak_score + 0.25 * dur_score
+    recency = min(0.05, max(0.0, (created_at - 1_700_000_000) / 1e10))
+    return float(base + recency)
+
+
 def _build_bundle(user_id: str) -> tuple[Path, str]:
-    """Concat all takes into one 24kHz mono reference clip up to BUNDLE_MAX_S."""
+    """Concat best-quality takes into one 24kHz mono reference clip up to BUNDLE_MAX_S."""
     user_dir = _user_dir(user_id)
     meta = _read_meta(user_id)
-    takes = sorted(meta.get("takes", []), key=lambda t: t.get("created_at", 0))
+    takes = list(meta.get("takes", []))
     if not takes:
         raise VoiceStoreError("No takes to bundle.")
 
-    silence = np.zeros(int(TARGET_SR * INTER_TAKE_SILENCE_MS / 1000), dtype=np.float32)
+    # Rank by quality (best first); preserve chronological order for playback.
+    ranked = sorted(takes, key=_take_quality_score, reverse=True)
+    selected: list[dict] = []
+    total_cap_samples = int(TARGET_SR * BUNDLE_MAX_S)
+    selected_samples = 0
+    silence_samples = int(TARGET_SR * INTER_TAKE_SILENCE_MS / 1000)
+
+    for t in ranked:
+        tp = user_dir / f"{t['id']}.wav"
+        if not tp.exists():
+            continue
+        # Estimate sample count from duration; if first take, no silence prefix.
+        take_samples = int((t.get("duration_s") or 0.0) * TARGET_SR)
+        gap = silence_samples if selected else 0
+        if selected_samples + gap + take_samples > total_cap_samples:
+            # Still try to fit a trimmed version if it would add meaningful length.
+            room = total_cap_samples - selected_samples - gap
+            if room < int(TARGET_SR * 1.5):
+                continue
+        selected.append(t)
+        selected_samples += gap + min(take_samples, total_cap_samples - selected_samples - gap)
+        if selected_samples >= total_cap_samples:
+            break
+
+    if not selected:
+        # Fallback: take the highest-quality one even if it exceeds duration estimate.
+        selected = [ranked[0]]
+
+    # Play back in chronological order for natural prosody continuity.
+    selected.sort(key=lambda t: t.get("created_at", 0))
+
+    silence = np.zeros(silence_samples, dtype=np.float32)
     parts: list[np.ndarray] = []
     ref_texts: list[str] = []
     used_ids: list[str] = []
-    total_cap_samples = int(TARGET_SR * BUNDLE_MAX_S)
     running = 0
 
-    for t in takes:
+    for t in selected:
         tp = user_dir / f"{t['id']}.wav"
         if not tp.exists():
             continue
@@ -249,7 +370,6 @@ def _build_bundle(user_id: str) -> tuple[Path, str]:
         if sr != TARGET_SR:
             wav = resampy.resample(wav, sr, TARGET_SR).astype(np.float32)
 
-        # Insert silence between takes (skip before the first)
         if running > 0 and running + len(silence) < total_cap_samples:
             parts.append(silence)
             running += len(silence)
@@ -293,6 +413,24 @@ def _bundle_paths(user_id: str) -> tuple[Path, Path]:
     return ud / "bundle.wav", ud / "bundle.json"
 
 
+def _profile_revision(
+    user_id: str,
+    takes: list[dict],
+    bundle_wav: Path,
+    bundle_json: Path,
+) -> tuple[str, float]:
+    """Return a stable-enough client cache revision for the current profile."""
+    stamps = [t.get("created_at", 0.0) for t in takes]
+    for p in (_meta_path(user_id), bundle_wav, bundle_json):
+        try:
+            stamps.append(p.stat().st_mtime)
+        except OSError:
+            pass
+    updated_at = max(stamps) if stamps else time.time()
+    revision = f"{int(updated_at * 1000)}-{len(takes)}"
+    return revision, updated_at
+
+
 # ── Read ──────────────────────────────────────────────────────────────
 
 def get_enrollment(user_id: str) -> dict | None:
@@ -316,6 +454,7 @@ def get_enrollment(user_id: str) -> dict | None:
 
     ordered = sorted(takes, key=lambda t: t.get("created_at", 0))
     total_raw_s = sum(t.get("duration_s", 0.0) for t in takes)
+    revision, updated_at = _profile_revision(user_id, ordered, bundle_wav, bundle_json)
     return {
         "user_id": user_id,
         "takes": [
@@ -332,6 +471,8 @@ def get_enrollment(user_id: str) -> dict | None:
         "duration_s": round(total_raw_s, 2),
         "bundle_duration_s": binfo.get("total_duration_s", 0.0),
         "created_at": ordered[0].get("created_at", time.time()),
+        "updated_at": updated_at,
+        "revision": revision,
     }
 
 

@@ -1,0 +1,41 @@
+# Portable container runtime dependencies for the FastAPI backend.
+# Excludes training-only packages and crepe, which conflicts with the runtime
+# resampy pin and is not imported by backend/app.
+
+# Core API
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.19
+pydantic==2.10.4
+
+# Audio processing
+torchaudio==2.5.1
+torch==2.5.1
+librosa==0.10.2
+soundfile==0.12.1
+numpy==1.26.4
+scipy==1.14.1
+pandas==2.2.3
+
+# TTS + ASR
+kokoro>=0.9.4
+faster-whisper>=1.0.3
+
+# Phoneme engine
+g2p-en==2.0.0
+transformers==4.47.1
+accelerate==1.2.1
+
+# Prosody / formants
+praat-parselmouth==0.4.5
+resampy==0.4.3
+
+# VAD
+onnxruntime==1.20.1
+
+# Utilities
+httpx==0.28.1
+python-dotenv==1.0.1
+
+# HuggingFace Hub for model downloads.
+huggingface-hub==0.27.0

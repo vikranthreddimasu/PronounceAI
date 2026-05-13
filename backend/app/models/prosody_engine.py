@@ -31,6 +31,7 @@ class ProsodyEngine:
         wav_np: np.ndarray,       # [T] float32, 16kHz
         phoneme_timestamps: list[dict],  # [{phoneme, start_ms, end_ms}, ...]
         reference_f0: np.ndarray | None = None,  # native F0 contour for DTW
+        include_formants: bool = True,
     ) -> dict:
         """
         Returns:
@@ -47,8 +48,14 @@ class ProsodyEngine:
         f0_contour, f0_voiced = self._extract_f0(wav_np)
         result["f0_contour"] = f0_contour.tolist()
 
-        # Formant analysis
-        result["formants"] = self._extract_formants(wav_np, phoneme_timestamps)
+        # Formant analysis is useful but noticeably slower. The score route can
+        # disable it for demo-fast responses and fall back to a neutral vowel
+        # quality score.
+        result["formants"] = (
+            self._extract_formants(wav_np, phoneme_timestamps)
+            if include_formants
+            else {}
+        )
 
         # Intonation score: DTW vs reference, or internal smoothness proxy
         result["intonation"] = self._intonation_score(f0_voiced, reference_f0)
@@ -69,7 +76,7 @@ class ProsodyEngine:
         """Returns (f0_contour [Hz, 0=unvoiced], voiced_only [Hz]) using Parselmouth."""
         try:
             snd = parselmouth.Sound(wav_np, sampling_frequency=self.sr)
-            pitch = snd.to_pitch(time_step=0.0, pitch_floor=75.0, pitch_ceiling=600.0)
+            pitch = snd.to_pitch(pitch_floor=75.0, pitch_ceiling=600.0)
             # selected_array['frequency'] is 0.0 for unvoiced frames
             f0 = pitch.selected_array["frequency"].astype(np.float64)
             f0 = np.nan_to_num(f0, nan=0.0)
@@ -129,17 +136,14 @@ class ProsodyEngine:
             return 50.0
 
         if reference_f0 is not None and len(reference_f0) > 5:
-            from scipy.spatial.distance import cdist
-            from scipy.optimize import linear_sum_assignment
             # Normalize both to z-score for speaker-invariant comparison
             def normalize(x):
                 std = x.std()
                 return (x - x.mean()) / std if std > 0 else x - x.mean()
-            a = normalize(f0_voiced).reshape(-1, 1)
-            b = normalize(reference_f0).reshape(-1, 1)
-            dist_matrix = cdist(a, b, "euclidean")
+            a = normalize(self._resample_contour(f0_voiced, 96))
+            b = normalize(self._resample_contour(reference_f0, 96))
             # Simple DTW via cumulative distance
-            dtw = self._dtw_distance(a.flatten(), b.flatten())
+            dtw = self._dtw_distance(a, b)
             # Max possible distance for normalisation
             max_dtw = max(len(a), len(b)) * 2.0
             score = max(0.0, 100 - (dtw / max_dtw * 100))
@@ -154,6 +158,12 @@ class ProsodyEngine:
         deviation = abs(var - ideal_var) / ideal_var
         score = max(0.0, 100 - deviation * 60)
         return round(score, 1)
+
+    def _resample_contour(self, arr: np.ndarray, n_out: int) -> np.ndarray:
+        if len(arr) <= n_out:
+            return arr.astype(np.float64)
+        src_idx = np.linspace(0, len(arr) - 1, n_out)
+        return np.interp(src_idx, np.arange(len(arr)), arr).astype(np.float64)
 
     def _dtw_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         n, m = len(a), len(b)

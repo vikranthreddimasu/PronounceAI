@@ -11,6 +11,8 @@ hits zero latency after the first synthesis.
 """
 import io
 import logging
+import os
+import threading
 from functools import lru_cache
 
 import numpy as np
@@ -24,13 +26,21 @@ router = APIRouter()
 VOICE_MAP = {
     "GA":       ("a", "af_heart"),   # lang_code, voice
     "RP":       ("b", "bf_emma"),
-    "AuE":      ("a", "af_bella"),   # closest available
-    "Irish":    ("b", "bm_george"),
-    "Scottish": ("b", "bm_lewis"),
-    "IndianE":  ("a", "am_michael"),
+    "AUE":      ("a", "af_bella"),   # closest available
+    "IRISH":    ("b", "bm_george"),
+    "SCOTTISH": ("b", "bm_lewis"),
+    "INDIANE":  ("a", "am_michael"),
 }
 
+MAX_TTS_TEXT_CHARS = 400
+
 SAMPLE_RATE = 24000   # Kokoro native output rate
+_PIPELINE_LOCK = threading.RLock()
+_AUDIO_CACHE_LOCK = threading.RLock()
+KOKORO_REPO_ID = os.getenv("KOKORO_REPO_ID", "hexgrad/Kokoro-82M")
+KOKORO_DEVICE = os.getenv("KOKORO_DEVICE", "cpu")
+KOKORO_CONFIG = os.getenv("KOKORO_CONFIG", "").strip()
+KOKORO_MODEL = os.getenv("KOKORO_MODEL", "").strip()
 
 
 def _synthesize(text: str, lang_code: str, voice: str, speed: float) -> bytes:
@@ -48,12 +58,35 @@ def _synthesize(text: str, lang_code: str, voice: str, speed: float) -> bytes:
     return buf.getvalue()
 
 
+@lru_cache(maxsize=1)
+def _get_model_cached():
+    if not (KOKORO_CONFIG and KOKORO_MODEL):
+        return True
+    from kokoro.model import KModel
+    logger.info(f"Loading Kokoro model files config={KOKORO_CONFIG} model={KOKORO_MODEL}")
+    return KModel(
+        repo_id=KOKORO_REPO_ID,
+        config=KOKORO_CONFIG,
+        model=KOKORO_MODEL,
+    ).to(KOKORO_DEVICE).eval()
+
+
 @lru_cache(maxsize=2)
-def _get_pipeline(lang_code: str):
+def _get_pipeline_cached(lang_code: str):
     """Cached pipeline — one per language code (a=American, b=British)."""
     from kokoro import KPipeline
-    logger.info(f"Loading Kokoro pipeline lang_code={lang_code}")
-    return KPipeline(lang_code=lang_code)
+    logger.info(f"Loading Kokoro pipeline lang_code={lang_code} repo_id={KOKORO_REPO_ID}")
+    return KPipeline(
+        lang_code=lang_code,
+        repo_id=KOKORO_REPO_ID,
+        model=_get_model_cached(),
+        device=KOKORO_DEVICE,
+    )
+
+
+def _get_pipeline(lang_code: str):
+    with _PIPELINE_LOCK:
+        return _get_pipeline_cached(lang_code)
 
 
 # In-memory audio cache: (text, accent, speed) → wav bytes
@@ -73,10 +106,20 @@ async def tts(
         accent = "GA"
     if not 0.5 <= speed <= 1.5:
         speed = 0.9
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Text is required.")
+    if len(text) > MAX_TTS_TEXT_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Text too long (max {MAX_TTS_TEXT_CHARS} chars).",
+        )
 
-    cache_key = (text[:200], accent, round(speed, 2))
-    if cache_key in _audio_cache:
-        return Response(content=_audio_cache[cache_key], media_type="audio/wav")
+    cache_key = (text, accent, round(speed, 2))
+    with _AUDIO_CACHE_LOCK:
+        cached = _audio_cache.get(cache_key)
+    if cached is not None:
+        return Response(content=cached, media_type="audio/wav")
 
     lang_code, voice = VOICE_MAP[accent]
     try:
@@ -85,9 +128,10 @@ async def tts(
         logger.error(f"TTS synthesis failed: {e}")
         raise HTTPException(status_code=500, detail="TTS synthesis failed")
 
-    if len(_audio_cache) >= _MAX_CACHE:
-        _audio_cache.pop(next(iter(_audio_cache)))
-    _audio_cache[cache_key] = wav_bytes
+    with _AUDIO_CACHE_LOCK:
+        if len(_audio_cache) >= _MAX_CACHE:
+            _audio_cache.pop(next(iter(_audio_cache)))
+        _audio_cache[cache_key] = wav_bytes
 
     return Response(
         content=wav_bytes,

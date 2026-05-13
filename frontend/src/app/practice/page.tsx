@@ -1,28 +1,28 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { Accent, AssessmentResult, PhonemeResult, Scores } from "@/lib/types";
-import { PHRASES, CATEGORY_LABELS } from "@/lib/phrases";
+import { CATEGORY_LABELS, shuffledPhrases } from "@/lib/phrases";
 import { createRecorder, type Recorder } from "@/lib/recorder";
-import { scoreRecording, playNativeAudio, isMockMode } from "@/lib/api";
+import {
+  scoreRecording,
+  playNativeAudio,
+  prefetchNativeAudio,
+  prepareNativeAudio,
+  prewarmPhrase,
+  isMockMode,
+} from "@/lib/api";
+import SpokenText from "@/components/SpokenText";
+import type { WordTiming } from "@/lib/voiceProfile";
 import { useCountUp } from "@/lib/useCountUp";
+import { isAbortError } from "@/lib/abortError";
 import { appendSession, getProfile, setProfile, subscribeStorage } from "@/lib/store";
 import { tap, confirm, release } from "@/lib/sounds";
 import PhonemeTimeline from "@/components/PhonemeTimeline";
 import ScoreBars from "@/components/ScoreBars";
 import PitchContourOverlay from "@/components/PitchContourOverlay";
 import PhonemeABDiff from "@/components/PhonemeABDiff";
-import AccentConvertCard from "@/components/AccentConvertCard";
-import EnrollmentModal from "@/components/EnrollmentModal";
-import SpokenText from "@/components/SpokenText";
-import {
-  fetchVoiceProfile,
-  getOrCreateVoiceId,
-  speakInVoice,
-  type VoiceProfile,
-  type WordTiming,
-} from "@/lib/voiceProfile";
 
 const ACCENT_LABELS: Record<Accent, string> = {
   GA: "General American",
@@ -128,7 +128,8 @@ export default function PracticePage() {
 
 function PracticeInner() {
   const searchParams = useSearchParams();
-  const initialPhrase = PHRASES[0];
+  const phraseList = useMemo(() => shuffledPhrases(), []);
+  const initialPhrase = phraseList[0];
   const [phraseIdx, setPhraseIdx] = useState(0);
   const [selectedPhraseId, setSelectedPhraseId] = useState<string | null>(initialPhrase.id);
   const [text, setText] = useState(initialPhrase.text);
@@ -140,26 +141,36 @@ function PracticeInner() {
   const [error, setError] = useState<string | null>(null);
   const [isPlayingTarget, setIsPlayingTarget] = useState(false);
   const [userAudioUrl, setUserAudioUrl] = useState<string | null>(null);
-  const [userAudioBlob, setUserAudioBlob] = useState<Blob | null>(null);
-  const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
-  const [enrollmentOpen, setEnrollmentOpen] = useState(false);
-  const [hearInVoiceState, setHearInVoiceState] = useState<"idle" | "loading" | "playing">("idle");
-  const [hearInVoiceWords, setHearInVoiceWords] = useState<WordTiming[]>([]);
 
+  const notebookLineRef = useRef<HTMLTextAreaElement | null>(null);
   const recorderRef = useRef<Recorder | null>(null);
   const userAudioRef = useRef<HTMLAudioElement | null>(null);
   const userAudioUrlRef = useRef<string | null>(null);
-  const hearInVoiceRef = useRef<HTMLAudioElement | null>(null);
-  const hearInVoiceUrlRef = useRef<string | null>(null);
+  const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mountedRef = useRef(true);
+  const scoreAbortRef = useRef<AbortController | null>(null);
+  const nativeTargetAbortRef = useRef<AbortController | null>(null);
+  const beginNativeTargetPlayback = useCallback(() => {
+    nativeTargetAbortRef.current?.abort();
+    const ac = new AbortController();
+    nativeTargetAbortRef.current = ac;
+    return ac;
+  }, []);
+  const [playback, setPlayback] = useState<{
+    audio: HTMLAudioElement;
+    words: WordTiming[];
+    kind: "native" | "user";
+  } | null>(null);
+  const [playing, setPlaying] = useState(false);
 
   const cleanText = text.trim();
-  const selectedPhrase = selectedPhraseId ? PHRASES.find((p) => p.id === selectedPhraseId) ?? null : null;
+  const selectedPhrase = selectedPhraseId ? phraseList.find((p) => p.id === selectedPhraseId) ?? null : null;
   const mode: SessionMode = selectedPhrase && selectedPhrase.text === cleanText ? "phrases" : "free";
   const canRecord = cleanText.length >= MIN_TEXT;
   const weak = useMemo(() => (result ? weakestPhoneme(result.phonemes) : null), [result]);
   const lowest = useMemo(() => (result ? lowestDimension(result.scores) : null), [result]);
   const sessionState = stateCopy(phase, !!result);
-  const progressPct = ((phraseIdx + 1) / PHRASES.length) * 100;
+  const progressPct = ((phraseIdx + 1) / phraseList.length) * 100;
 
   const clearRecording = useCallback(() => {
     if (userAudioUrlRef.current) {
@@ -167,7 +178,6 @@ function PracticeInner() {
       userAudioUrlRef.current = null;
     }
     setUserAudioUrl(null);
-    setUserAudioBlob(null);
   }, []);
 
   useEffect(() => {
@@ -177,11 +187,29 @@ function PracticeInner() {
   }, []);
 
   useEffect(() => {
+    const ac = new AbortController();
+    const current = window.setTimeout(() => {
+      prewarmPhrase(cleanText, accent, { signal: ac.signal });
+      prefetchNativeAudio(cleanText, accent, 0.9, { signal: ac.signal });
+    }, mode === "phrases" ? 80 : 420);
+    const next = phraseList[(phraseIdx + 1) % phraseList.length];
+    const nextTimer = next ? window.setTimeout(() => {
+      prewarmPhrase(next.text, accent, { signal: ac.signal });
+      prefetchNativeAudio(next.text, accent, 0.9, { signal: ac.signal });
+    }, 900) : null;
+    return () => {
+      ac.abort();
+      window.clearTimeout(current);
+      if (nextTimer !== null) window.clearTimeout(nextTimer);
+    };
+  }, [accent, cleanText, mode, phraseIdx, phraseList]);
+
+  useEffect(() => {
     const id = searchParams.get("phrase");
     if (!id) return;
-    const idx = PHRASES.findIndex((p) => p.id === id);
+    const idx = phraseList.findIndex((p) => p.id === id);
     if (idx >= 0) {
-      const phrase = PHRASES[idx];
+      const phrase = phraseList[idx];
       setPhraseIdx(idx);
       setSelectedPhraseId(phrase.id);
       setText(phrase.text);
@@ -189,41 +217,75 @@ function PracticeInner() {
       setSourceOpen(false);
       clearRecording();
     }
-  }, [searchParams, clearRecording]);
+  }, [searchParams, clearRecording, phraseList]);
 
   useEffect(() => {
-    const id = getOrCreateVoiceId();
-    fetchVoiceProfile(id)
-      .then((profile) => setVoiceProfile(profile))
-      .catch(() => setVoiceProfile(null));
-  }, []);
-
-  useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      scoreAbortRef.current?.abort();
+      scoreAbortRef.current = null;
+      nativeTargetAbortRef.current?.abort();
+      nativeTargetAbortRef.current = null;
       recorderRef.current?.dispose();
       if (userAudioUrlRef.current) URL.revokeObjectURL(userAudioUrlRef.current);
-      if (hearInVoiceUrlRef.current) URL.revokeObjectURL(hearInVoiceUrlRef.current);
     };
   }, []);
+
+  /** Autosize: shrink‑to‑measure `scrollHeight` so wrapped lines never need an inner scrollbar. */
+  useLayoutEffect(() => {
+    let cancelled = false;
+
+    function syncNotebookLineHeight() {
+      const ta = notebookLineRef.current;
+      if (!ta) return;
+      ta.style.overflow = "hidden";
+      ta.style.height = "0px";
+      ta.style.minHeight = "0";
+      // Force layout so scrollHeight reflects wrapped content before reading.
+      void ta.offsetHeight;
+      const sh = Math.ceil(ta.scrollHeight);
+      /* +2 avoids sub-pixel rounding clipping the last wrapped line */
+      const next = Math.max(56, sh + 2);
+      ta.style.height = `${next}px`;
+      ta.style.minHeight = "";
+    }
+
+    syncNotebookLineHeight();
+
+    window.addEventListener("resize", syncNotebookLineHeight);
+
+    const fonts = document.fonts;
+    if (fonts?.ready) {
+      void fonts.ready.then(() => {
+        if (!cancelled) syncNotebookLineHeight();
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", syncNotebookLineHeight);
+    };
+  }, [text]);
 
   const sourceList = useMemo(() => {
     const q = sourceQuery.trim().toLowerCase();
     if (q) {
-      return PHRASES.filter(
+      return phraseList.filter(
         (phrase) =>
           phrase.text.toLowerCase().includes(q) ||
           phrase.focus.toLowerCase().includes(q) ||
           CATEGORY_LABELS[phrase.category].toLowerCase().includes(q)
-      ).slice(0, 10);
+      );
     }
-    return Array.from({ length: 8 }, (_, offset) => PHRASES[(phraseIdx + offset) % PHRASES.length]);
-  }, [phraseIdx, sourceQuery]);
+    return phraseList;
+  }, [sourceQuery, phraseList]);
 
   const applyPhrase = useCallback(
     (id: string) => {
-      const idx = PHRASES.findIndex((p) => p.id === id);
+      const idx = phraseList.findIndex((p) => p.id === id);
       if (idx < 0) return;
-      const phrase = PHRASES[idx];
+      const phrase = phraseList[idx];
       tap();
       setPhraseIdx(idx);
       setSelectedPhraseId(phrase.id);
@@ -231,17 +293,15 @@ function PracticeInner() {
       setResult(null);
       setError(null);
       setSourceOpen(false);
-      setHearInVoiceWords([]);
-      setHearInVoiceState("idle");
       clearRecording();
     },
-    [clearRecording]
+    [clearRecording, phraseList]
   );
 
   const nextPhrase = useCallback(() => {
-    const next = PHRASES[(phraseIdx + 1) % PHRASES.length];
+    const next = phraseList[(phraseIdx + 1) % phraseList.length];
     applyPhrase(next.id);
-  }, [applyPhrase, phraseIdx]);
+  }, [applyPhrase, phraseIdx, phraseList]);
 
   const handleTextChange = useCallback(
     (value: string) => {
@@ -249,8 +309,6 @@ function PracticeInner() {
       setSelectedPhraseId(null);
       setResult(null);
       setError(null);
-      setHearInVoiceWords([]);
-      setHearInVoiceState("idle");
       clearRecording();
     },
     [clearRecording]
@@ -262,17 +320,24 @@ function PracticeInner() {
     setAccent(next);
     setProfile({ targetAccent: next });
     setResult(null);
-    setHearInVoiceWords([]);
-    setHearInVoiceState("idle");
     clearRecording();
   }, [accent, clearRecording]);
 
   async function handlePlayTarget() {
     if (isPlayingTarget || !cleanText) return;
     tap();
+    const ac = beginNativeTargetPlayback();
     setIsPlayingTarget(true);
-    await playNativeAudio(cleanText, accent);
-    setIsPlayingTarget(false);
+    try {
+      await playNativeAudio(cleanText, accent, 0.9, { signal: ac.signal });
+    } catch (e) {
+      if (!isAbortError(e) && mountedRef.current) {
+        setError((e as Error).message ?? "Could not play the target clip.");
+      }
+    } finally {
+      if (nativeTargetAbortRef.current === ac) nativeTargetAbortRef.current = null;
+      if (mountedRef.current) setIsPlayingTarget(false);
+    }
   }
 
   async function handleRecord() {
@@ -298,21 +363,32 @@ function PracticeInner() {
     if (!recorderRef.current) return;
     release();
     setPhase("processing");
+    scoreAbortRef.current?.abort();
+    const ac = new AbortController();
+    scoreAbortRef.current = ac;
     try {
       const blob = await recorderRef.current.stop();
       const url = URL.createObjectURL(blob);
       userAudioUrlRef.current = url;
       setUserAudioUrl(url);
-      setUserAudioBlob(blob);
       const profile = getProfile();
-      const assessment = await scoreRecording(blob, cleanText, accent, profile.l1 ?? "unknown");
+      const assessment = await scoreRecording(blob, cleanText, accent, profile.l1 ?? "unknown", {
+        signal: ac.signal,
+      });
+      if (!mountedRef.current || ac.signal.aborted) return;
       setResult(assessment);
       appendSession(assessment, { phrase: cleanText, mode, accent });
       setPhase("idle");
       confirm();
     } catch (e) {
+      if (!mountedRef.current || isAbortError(e)) {
+        if (mountedRef.current) setPhase("idle");
+        return;
+      }
       setError((e as Error).message ?? "Scoring failed. Try one more recording.");
       setPhase("idle");
+    } finally {
+      if (scoreAbortRef.current === ac) scoreAbortRef.current = null;
     }
   }
 
@@ -326,7 +402,120 @@ function PracticeInner() {
     }
   }
 
-  const playTargetFromPanel = useCallback(() => playNativeAudio(cleanText, accent), [accent, cleanText]);
+  const stopSyncedPlayback = useCallback(() => {
+    if (playbackAudioRef.current) {
+      try {
+        playbackAudioRef.current.pause();
+      } catch {}
+    }
+    playbackAudioRef.current = null;
+    setPlayback(null);
+    setPlaying(false);
+  }, []);
+
+  useEffect(() => {
+    nativeTargetAbortRef.current?.abort();
+    nativeTargetAbortRef.current = null;
+    setIsPlayingTarget(false);
+    if (playback?.kind === "native") {
+      stopSyncedPlayback();
+    }
+  }, [accent, phraseIdx, playback?.kind, stopSyncedPlayback]);
+
+  const playSyncedNative = useCallback(async () => {
+    if (!cleanText) return;
+    stopSyncedPlayback();
+    const ac = beginNativeTargetPlayback();
+    let prepared: Awaited<ReturnType<typeof prepareNativeAudio>> = null;
+    try {
+      prepared = await prepareNativeAudio(cleanText, accent, 0.9, { signal: ac.signal });
+    } catch (e) {
+      if (isAbortError(e)) return;
+      prepared = null;
+    }
+    if (ac.signal.aborted) return;
+    if (!prepared) {
+      try {
+        await playNativeAudio(cleanText, accent, 0.9, { signal: ac.signal });
+      } catch (e) {
+        if (!isAbortError(e) && mountedRef.current) setError((e as Error).message ?? "Playback failed.");
+      } finally {
+        if (nativeTargetAbortRef.current === ac) nativeTargetAbortRef.current = null;
+      }
+      return;
+    }
+    playbackAudioRef.current = prepared.audio;
+    setPlayback({ audio: prepared.audio, words: prepared.words, kind: "native" });
+    setPlaying(true);
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      ac.signal.removeEventListener("abort", onAbortDuringPlay);
+      setPlaying(false);
+      playbackAudioRef.current = null;
+      if (nativeTargetAbortRef.current === ac) nativeTargetAbortRef.current = null;
+    };
+    function onAbortDuringPlay() {
+      try {
+        prepared!.audio.pause();
+      } catch {}
+      cleanup();
+    }
+    ac.signal.addEventListener("abort", onAbortDuringPlay);
+
+    prepared.audio.addEventListener("ended", cleanup, { once: true });
+    prepared.audio.addEventListener("error", cleanup, { once: true });
+    try {
+      await prepared.audio.play();
+    } catch {
+      cleanup();
+    }
+  }, [accent, beginNativeTargetPlayback, cleanText, stopSyncedPlayback]);
+
+  const playSyncedUser = useCallback(async () => {
+    if (!userAudioUrl) return;
+    stopSyncedPlayback();
+    if (!userAudioRef.current) userAudioRef.current = new Audio();
+    const audio = userAudioRef.current;
+    audio.src = userAudioUrl;
+    audio.currentTime = 0;
+    const words: WordTiming[] = (result?.transcript?.words ?? []).map((w) => ({
+      word: w.word,
+      start_ms: w.start_ms,
+      end_ms: w.end_ms,
+    }));
+    playbackAudioRef.current = audio;
+    setPlayback({ audio, words, kind: "user" });
+    setPlaying(true);
+    const onEnd = () => {
+      setPlaying(false);
+      playbackAudioRef.current = null;
+    };
+    audio.onended = onEnd;
+    audio.onerror = onEnd;
+    try {
+      await audio.play();
+    } catch {
+      onEnd();
+    }
+  }, [result?.transcript?.words, stopSyncedPlayback, userAudioUrl]);
+
+  useEffect(() => () => stopSyncedPlayback(), [stopSyncedPlayback]);
+
+  const playTargetFromPanel = useCallback(async () => {
+    const ac = beginNativeTargetPlayback();
+    try {
+      await playNativeAudio(cleanText, accent, 0.9, { signal: ac.signal });
+    } catch (e) {
+      if (!isAbortError(e) && mountedRef.current) {
+        setError((e as Error).message ?? "Could not play the target clip.");
+      }
+    } finally {
+      if (nativeTargetAbortRef.current === ac) nativeTargetAbortRef.current = null;
+    }
+  }, [accent, beginNativeTargetPlayback, cleanText]);
 
   const playUserRecording = useCallback((): Promise<void> => {
     if (!userAudioUrl) return Promise.resolve();
@@ -341,43 +530,12 @@ function PracticeInner() {
     });
   }, [userAudioUrl]);
 
-  async function handleHearInVoice() {
-    if (!cleanText || hearInVoiceState !== "idle") return;
-    tap();
-    if (!voiceProfile) {
-      setEnrollmentOpen(true);
-      return;
-    }
-    setHearInVoiceState("loading");
-    setHearInVoiceWords([]);
-    try {
-      const id = getOrCreateVoiceId();
-      const clip = await speakInVoice(id, cleanText, accent);
-      if (hearInVoiceUrlRef.current) URL.revokeObjectURL(hearInVoiceUrlRef.current);
-      const url = URL.createObjectURL(clip.audio);
-      hearInVoiceUrlRef.current = url;
-      setHearInVoiceWords(clip.words);
-      if (!hearInVoiceRef.current) hearInVoiceRef.current = new Audio();
-      const audio = hearInVoiceRef.current;
-      audio.src = url;
-      audio.currentTime = 0;
-      audio.onended = () => setHearInVoiceState("idle");
-      audio.onerror = () => setHearInVoiceState("idle");
-      setHearInVoiceState("playing");
-      audio.play().catch(() => setHearInVoiceState("idle"));
-      confirm();
-    } catch (e) {
-      setError((e as Error).message ?? "Voice rendering failed.");
-      setHearInVoiceState("idle");
-    }
-  }
-
   return (
     <main className="notebook-session">
-      <section className="session-notebook" aria-label="Pronunciation session notebook">
+      <section className="session-notebook" aria-label="Practice session">
         <header className="workspace-bar">
           <div>
-            <p className="eyebrow">Pronunciation notebook</p>
+            <p className="eyebrow">Practice</p>
             <h1>{sessionState.label}</h1>
           </div>
           <div className="workspace-status">
@@ -402,9 +560,9 @@ function PracticeInner() {
 
           <article className="line-note">
             <header className="line-note-header">
-              <div>
+              <div className="line-note-meta">
                 <p className="eyebrow">Current line</p>
-                <span>
+                <span className="line-note-submeta">
                   {selectedPhrase
                     ? `${CATEGORY_LABELS[selectedPhrase.category]} · ${focusLabel(selectedPhrase.focus)}`
                     : `${cleanText.length}/${MAX_TEXT} characters`}
@@ -421,11 +579,12 @@ function PracticeInner() {
             </header>
 
             <textarea
+              ref={notebookLineRef}
               value={text}
               onChange={(e) => handleTextChange(e.target.value)}
               disabled={phase !== "idle"}
               className="notebook-line"
-              rows={2}
+              rows={1}
               aria-label="Practice line"
               placeholder="Write a short English line."
             />
@@ -437,7 +596,7 @@ function PracticeInner() {
             )}
 
             <footer className="line-note-footer">
-              <span>{mode === "free" ? "Custom line" : `Line ${phraseIdx + 1} of ${PHRASES.length}`}</span>
+              <span>{mode === "free" ? "Custom line" : `Line ${phraseIdx + 1} of ${phraseList.length}`}</span>
               <span>{ACCENT_LABELS[accent]}</span>
             </footer>
 
@@ -450,7 +609,11 @@ function PracticeInner() {
                   placeholder="Search sound or phrase"
                   aria-label="Search phrases"
                 />
-                <div>
+                <p className="notebook-source-count" aria-live="polite">
+                  Showing {sourceList.length} of {phraseList.length} lines
+                  {sourceQuery.trim() ? " (filtered)" : ""}
+                </p>
+                <div className="notebook-source-list">
                   {sourceList.map((phrase) => (
                     <button
                       key={phrase.id}
@@ -473,45 +636,30 @@ function PracticeInner() {
             </p>
           )}
 
-          {(hearInVoiceState !== "idle" || hearInVoiceWords.length > 0) && (
-            <article className="voice-preview-note">
-              <p className="eyebrow">Your voice</p>
-              {hearInVoiceState === "loading" ? (
-                <p>Rendering this line in your enrolled voice.</p>
-              ) : hearInVoiceWords.length > 0 ? (
-                <SpokenText
-                  words={hearInVoiceWords}
-                  audio={hearInVoiceRef.current}
-                  playing={hearInVoiceState === "playing"}
-                />
-              ) : (
-                <p>Ready to play your synthesized voice.</p>
-              )}
-            </article>
-          )}
-
           {result && (
             <Review
               result={result}
               weak={weak}
               lowest={lowest}
               accent={accent}
-              userAudioBlob={userAudioBlob}
               userAudioUrl={userAudioUrl}
-              voiceProfile={voiceProfile}
-              hearInVoiceState={hearInVoiceState}
-              hearInVoiceWords={hearInVoiceWords}
-              hearInVoiceRef={hearInVoiceRef.current}
               onPlayTarget={playTargetFromPanel}
               onPlayUser={playUserRecording}
+              onPlaySyncedTarget={playSyncedNative}
+              onPlaySyncedUser={playSyncedUser}
+              onStopSynced={stopSyncedPlayback}
+              playback={playback}
+              playing={playing}
               onTryAgain={() => {
                 tap();
+                stopSyncedPlayback();
                 setResult(null);
                 clearRecording();
               }}
-              onNextLine={nextPhrase}
-              onHearInVoice={handleHearInVoice}
-              onOpenEnrollment={() => setEnrollmentOpen(true)}
+              onNextLine={() => {
+                stopSyncedPlayback();
+                nextPhrase();
+              }}
             />
           )}
         </div>
@@ -531,19 +679,6 @@ function PracticeInner() {
               disabled={!cleanText || isPlayingTarget || phase !== "idle"}
             >
               {isPlayingTarget ? "Playing" : "Hear target"}
-            </button>
-            <button
-              className="composer-secondary press"
-              onClick={handleHearInVoice}
-              disabled={!cleanText || phase !== "idle" || hearInVoiceState !== "idle"}
-            >
-              {!voiceProfile
-                ? "Set up my voice"
-                : hearInVoiceState === "loading"
-                ? "Rendering"
-                : hearInVoiceState === "playing"
-                ? "Playing voice"
-                : "Hear my voice"}
             </button>
             {result && (
               <button className="composer-secondary press" onClick={nextPhrase} disabled={phase !== "idle"}>
@@ -576,11 +711,6 @@ function PracticeInner() {
         </footer>
       </section>
 
-      <EnrollmentModal
-        open={enrollmentOpen}
-        onClose={() => setEnrollmentOpen(false)}
-        onEnrolled={(profile) => setVoiceProfile(profile)}
-      />
     </main>
   );
 }
@@ -590,35 +720,31 @@ function Review({
   weak,
   lowest,
   accent,
-  userAudioBlob,
   userAudioUrl,
-  voiceProfile,
-  hearInVoiceState,
-  hearInVoiceWords,
-  hearInVoiceRef,
   onPlayTarget,
   onPlayUser,
+  onPlaySyncedTarget,
+  onPlaySyncedUser,
+  onStopSynced,
+  playback,
+  playing,
   onTryAgain,
   onNextLine,
-  onHearInVoice,
-  onOpenEnrollment,
 }: {
   result: AssessmentResult;
   weak: PhonemeResult | null;
   lowest: [keyof Scores, number] | null;
   accent: Accent;
-  userAudioBlob: Blob | null;
   userAudioUrl: string | null;
-  voiceProfile: VoiceProfile | null;
-  hearInVoiceState: "idle" | "loading" | "playing";
-  hearInVoiceWords: WordTiming[];
-  hearInVoiceRef: HTMLAudioElement | null;
   onPlayTarget: () => Promise<void>;
   onPlayUser: () => Promise<void> | void;
+  onPlaySyncedTarget: () => Promise<void> | void;
+  onPlaySyncedUser: () => Promise<void> | void;
+  onStopSynced: () => void;
+  playback: { audio: HTMLAudioElement; words: WordTiming[]; kind: "native" | "user" } | null;
+  playing: boolean;
   onTryAgain: () => void;
   onNextLine: () => void;
-  onHearInVoice: () => void;
-  onOpenEnrollment: () => void;
 }) {
   const animated = useCountUp(result.overall, 700);
   const [lowestKey, lowestValue] = lowest ?? ["phoneme_accuracy", result.scores.phoneme_accuracy];
@@ -636,18 +762,81 @@ function Review({
             Lowest signal: {dimensionLabel(lowestKey)} at {Math.round(lowestValue)}%.
             {weak ? ` Focus on /${weak.expected}/ before chasing the total score.` : ""}
           </p>
+          {result.feedback.length > 0 && (
+            <ul
+              aria-label="Coaching tips"
+              style={{
+                display: "grid",
+                gap: 8,
+                marginTop: 14,
+                marginBottom: 4,
+                padding: 0,
+                listStyle: "none",
+              }}
+            >
+              {result.feedback.slice(0, 3).map((tip, index) => (
+                <li
+                  key={`${tip.text}-${index}`}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 0,
+                    background: "transparent",
+                    borderLeft: "2px solid var(--ink)",
+                    color: "var(--ink-2)",
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {tip.text}
+                </li>
+              ))}
+            </ul>
+          )}
+          {playback && (
+            <div
+              style={{
+                marginTop: 16,
+                paddingTop: 14,
+                borderTop: "1px solid var(--rule)",
+                display: "grid",
+                gap: 8,
+              }}
+            >
+              <p
+                className="eyebrow"
+                style={{ color: playback.kind === "user" ? "var(--accent)" : "var(--ink-3)" }}
+              >
+                {playback.kind === "user" ? "Your take" : "Target voice"}
+              </p>
+              <SpokenText
+                words={playback.words}
+                audio={playback.audio}
+                playing={playing}
+                size="md"
+              />
+            </div>
+          )}
           <div className="review-actions">
+            <button
+              className="btn-paper press"
+              onClick={() => (playback?.kind === "native" && playing ? onStopSynced() : onPlaySyncedTarget())}
+            >
+              {playback?.kind === "native" && playing ? "Stop target" : "Play target"}
+            </button>
+            {userAudioUrl && (
+              <button
+                className="btn-paper press"
+                onClick={() => (playback?.kind === "user" && playing ? onStopSynced() : onPlaySyncedUser())}
+              >
+                {playback?.kind === "user" && playing ? "Stop your take" : "Play your take"}
+              </button>
+            )}
             <button className="btn-paper btn-primary press" onClick={onTryAgain}>
               Try same line
             </button>
             <button className="btn-paper press" onClick={onNextLine}>
               Next line
             </button>
-            {userAudioUrl && (
-              <button className="btn-paper press" onClick={() => onPlayUser()}>
-                Play your take
-              </button>
-            )}
           </div>
         </div>
       </article>
@@ -679,39 +868,6 @@ function Review({
               />
             )}
           </div>
-        </div>
-      </details>
-
-      <details className="analysis-fold">
-        <summary>
-          <span>Voice experiment</span>
-          <small>optional rendering</small>
-        </summary>
-        <div className="voice-context">
-          {voiceProfile && (
-            <button
-              className="btn-paper press"
-              onClick={onHearInVoice}
-              disabled={hearInVoiceState !== "idle"}
-            >
-              {hearInVoiceState === "loading"
-                ? "Rendering voice"
-                : hearInVoiceState === "playing"
-                ? "Playing voice"
-                : `Hear your voice in ${accent}`}
-            </button>
-          )}
-          {hearInVoiceWords.length > 0 && hearInVoiceState !== "idle" && (
-            <div className="quiet-panel" style={{ padding: 16 }}>
-              <SpokenText words={hearInVoiceWords} audio={hearInVoiceRef} playing={hearInVoiceState === "playing"} />
-            </div>
-          )}
-          <AccentConvertCard
-            userAudio={userAudioBlob}
-            accent={accent}
-            voiceProfile={voiceProfile}
-            onOpenEnrollment={onOpenEnrollment}
-          />
         </div>
       </details>
     </section>

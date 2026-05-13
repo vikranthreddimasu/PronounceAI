@@ -26,11 +26,15 @@ export type FeedbackTip = {
  * Pitch contour — F0 over time, z-score normalised within voiced frames.
  * Same length for native + user so they overlay on a shared x-axis.
  * Unvoiced frames are `null` (so the line breaks naturally).
+ *
+ * Backend aligns both curves by **speech onset** (leading / trailing silence
+ * trimmed before resampling); `duration_ms` approximates the longer voiced span
+ * used for hover timing and playback playhead pacing.
  */
 export type PitchContour = {
   native: (number | null)[];
   user: (number | null)[];
-  duration_ms: number;  // total span the contour represents
+  duration_ms: number;
 };
 
 export type AssessmentResult = {
@@ -47,7 +51,25 @@ export type AssessmentResult = {
   wer?: number | null;
   debug?: {
     elapsed_ms?: number;
+    stage_ms?: Record<string, number>;
+    cache_hit?: boolean;
+    cached_from_elapsed_ms?: number;
+    latency_mode?: {
+      asr: string;
+      formants: boolean;
+      wavlm: string;
+      response_cache: boolean;
+    };
     accent_score?: number | null;
+    phrase_match?: {
+      wer: number;
+      char_similarity: number;
+      word_coverage: number;
+      phrase_match: number;
+    } | null;
+    learned_assessment?: Record<string, number> | null;
+    score_gates?: Array<Record<string, unknown>>;
+    phonological_diagnostics?: Array<Record<string, unknown>>;
     npvi?: number | null;
     speech_rate_sps?: number | null;
     formants?: Record<string, { f1: number; f2: number; f3: number }>;

@@ -225,19 +225,25 @@ export default function PitchContourOverlay({
 
   return (
     <div className="result-enter w-full">
-      <p
-        className="mb-3 text-xs font-medium uppercase tracking-widest"
-        style={{ color: "var(--ink-4)" }}
-      >
-        Pitch contour
-      </p>
+      <div className="mb-3 space-y-1">
+        <p
+          className="text-xs font-medium uppercase tracking-widest"
+          style={{ color: "var(--ink-4)" }}
+        >
+          Pitch contour
+        </p>
+        <p className="text-[10px] leading-snug m-0" style={{ color: "var(--ink-5)", maxWidth: "52ch" }}>
+          Compared from speech onset (leading silence trimmed so both traces start near where voicing begins).
+        </p>
+      </div>
 
       <div
         style={{
-          padding: "14px 12px 12px",
-          borderRadius: 18,
-          background: "var(--surface)",
-          border: "1px solid var(--line)",
+          padding: "16px 0",
+          borderRadius: 0,
+          background: "transparent",
+          borderTop: "1px solid var(--rule)",
+          borderBottom: "1px solid var(--rule)",
           position: "relative",
           overflow: "hidden",
         }}
@@ -388,7 +394,7 @@ export default function PitchContourOverlay({
               color: "var(--ink-3)",
               background: "var(--bg)",
               border: "1px solid var(--line)",
-              borderRadius: 6,
+              borderRadius: 0,
               padding: "4px 8px",
               fontVariantNumeric: "tabular-nums",
               pointerEvents: "none",
@@ -460,16 +466,19 @@ function ContourPlayBtn({
       onClick={onClick}
       disabled={disabled}
       style={{
-        padding: "5px 11px",
-        borderRadius: 9999,
-        fontSize: 11,
-        fontWeight: 600,
-        background: active ? color + "22" : "transparent",
-        border: `1px solid ${active ? color : "var(--line)"}`,
-        color: active ? color : "var(--ink-3)",
+        padding: "6px 12px",
+        borderRadius: 0,
+        fontFamily: "var(--type-sans)",
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "0.14em",
+        textTransform: "uppercase",
+        background: active ? color : "transparent",
+        border: `1px solid ${active ? color : "var(--rule)"}`,
+        color: active ? "var(--paper)" : "var(--ink)",
         opacity: disabled && !active ? 0.4 : 1,
         cursor: disabled ? "default" : "pointer",
-        transition: "all 180ms var(--ease-out)",
+        transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out), opacity 180ms var(--ease-out)",
         position: "relative",
       }}
     >

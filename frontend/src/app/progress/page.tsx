@@ -56,7 +56,7 @@ export default function ProgressPage() {
     return (
       <main className="notebook-page">
         <section className="empty-notebook">
-          <p className="eyebrow">Notebook</p>
+          <p className="eyebrow">Progress</p>
           <h1>Nothing to analyze yet.</h1>
           <p>
             After one recording, this becomes a quiet record of attempts, weak sounds, and the next useful practice target.
@@ -73,7 +73,7 @@ export default function ProgressPage() {
     <main className="notebook-page">
       <section className="notebook-header">
         <div>
-          <p className="eyebrow">Notebook</p>
+          <p className="eyebrow">Progress</p>
           <h1>What changed?</h1>
         </div>
         <Link href="/practice" onClick={() => tap()} className="btn-paper press">
@@ -137,7 +137,7 @@ export default function ProgressPage() {
 }
 
 function SessionRow({ session }: { session: Session }) {
-  const tone = session.overall >= 80 ? "var(--jade)" : session.overall >= 65 ? "var(--accent)" : "var(--rose)";
+  const tone = session.overall >= 80 ? "var(--jade)" : session.overall >= 65 ? "var(--ink)" : "var(--accent)";
   return (
     <article className="attempt-row">
       <span className="attempt-score" style={{ color: tone, borderColor: tone }}>

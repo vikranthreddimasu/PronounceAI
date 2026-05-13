@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      DEVICE: cpu
+      CORS_ORIGINS: http://localhost:3000
+      LOAD_WHISPER: "0"
+      LOAD_VOICE_CLONE: "0"
+      PREWARM_MODELS: "0"
+      SCORE_ASR_MODE: off
+      SCORE_INCLUDE_FORMANTS: "0"
+      SCORE_WAVLM_MODE: off
+      NATIVE_F0_CACHE_DIR: /app/cache/native_f0
+      ENROLLMENT_DIR: /app/data/enrollments
+    volumes:
+      - backend_hf_cache:/app/.cache/huggingface
+      - backend_native_f0:/app/cache/native_f0
+      - backend_enrollments:/app/data/enrollments
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_USE_MOCK: ""
+    depends_on:
+      - backend
+
+volumes:
+  backend_hf_cache:
+  backend_native_f0:
+  backend_enrollments:
