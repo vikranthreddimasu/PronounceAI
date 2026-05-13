@@ -6,8 +6,9 @@
 [![python](https://img.shields.io/badge/python-3.11-3776AB)](backend/requirements.prod.txt)
 [![nextjs](https://img.shields.io/badge/Next.js-16-000000)](frontend/package.json)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![samples](https://img.shields.io/badge/▶_sample_gallery-A78BFA?logoColor=fff)](https://vikranthreddimasu.github.io/PronounceAI/)
 
-> **Heads-up on the audio samples below.** GitHub's README renderer doesn't embed audio inline — it only embeds videos uploaded via the comment drag-drop UI. Each waveform thumbnail in this README is a clickable link that opens the MP4 in your browser, where the system audio player plays it with one tap. The thumbnails encode the actual waveform of each clip so you can scan the gallery at a glance before playing.
+> 🎧 **Sample gallery → <https://vikranthreddimasu.github.io/PronounceAI/>** — every audio sample below is playable inline on that page. The thumbnails in this README link straight to the corresponding clip in the gallery, where a native HTML5 player opens and plays it without downloading.
 
 ---
 
@@ -17,13 +18,13 @@ A learner's enrolled voice, then the same speaker rendered in a long American-En
 
 **Their natural voice (enrolment recording)**
 
-[![Play the enrolment recording](docs/samples/voice_user_original_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_user_original.mp4)
+[![Play the enrolment recording](docs/samples/voice_user_original_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#user-original)
 
 > *"Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river…"*
 
 **Their voice — rendered by PronounceAI in General American**
 
-[![Play the General American clone](docs/samples/voice_user_clone_ga_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_user_clone_ga.mp4)
+[![Play the General American clone](docs/samples/voice_user_clone_ga_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#user-clone-ga)
 
 > *"The renewable energy transition will define the next half-century, and the engineers who solve the storage problem will reshape every industry from agriculture to artificial intelligence."*
 
@@ -93,27 +94,27 @@ flowchart LR
 
 ### 1 · Voice cloning across emotions and accents
 
-CosyVoice 3 voice conversion. The learner records once; every clip below is generated from that single enrolment. Click any waveform to hear the rendering.
+CosyVoice 3 voice conversion. The learner records once; every clip below is generated from that single enrolment. Click any waveform to open the [sample gallery](https://vikranthreddimasu.github.io/PronounceAI/) and play the rendering inline.
 
 **Happy · General American** — *"I just got promoted today. I am so excited for the future!"*
 
-[![Play Happy / GA](docs/samples/voice_happy_ga_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_happy_ga.mp4)
+[![Play Happy / GA](docs/samples/voice_happy_ga_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#happy-ga)
 
 **Sad · Received Pronunciation** — *"The old photograph brought back so many precious memories."*
 
-[![Play Sad / RP](docs/samples/voice_sad_rp_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_sad_rp.mp4)
+[![Play Sad / RP](docs/samples/voice_sad_rp_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#sad-rp)
 
 **Angry · General American** — *"This is completely unacceptable. I demand to speak to the manager."*
 
-[![Play Angry / GA](docs/samples/voice_angry_ga_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_angry_ga.mp4)
+[![Play Angry / GA](docs/samples/voice_angry_ga_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#angry-ga)
 
 **Calm · Received Pronunciation** — *"Close your eyes. Breathe in slowly. Let the tension fade away."*
 
-[![Play Calm / RP](docs/samples/voice_calm_rp_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_calm_rp.mp4)
+[![Play Calm / RP](docs/samples/voice_calm_rp_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#calm-rp)
 
 **Whisper · General American** — *"I need to tell you a secret, but you must promise not to tell anyone."*
 
-[![Play Whisper / GA](docs/samples/voice_whisper_ga_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_whisper_ga.mp4)
+[![Play Whisper / GA](docs/samples/voice_whisper_ga_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#whisper-ga)
 
 ### 2 · Pronunciation scoring
 
@@ -121,9 +122,9 @@ Three score JSON fixtures are committed so the response shape is inspectable wit
 
 | Phrase · Accent | Overall | Phrase match | JSON | Native reference |
 | --- | :-: | :-: | --- | --- |
-| "Ship or sheep?" · GA | **84.5** | `ok` | [json](docs/samples/score_ga_ship_or_sheep.json) | [![play](docs/samples/tts_ga_ship_or_sheep_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/tts_ga_ship_or_sheep.mp4) |
-| "She sells seashells by the seashore." · GA | **92.4** | `ok` | [json](docs/samples/score_ga_seashells.json) | [![play](docs/samples/tts_ga_seashells_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/tts_ga_seashells.mp4) |
-| "The quick brown fox jumps over the lazy dog." · GA | **92.3** | `ok` | [json](docs/samples/score_rp_quick_brown_fox_rp.json) | [![play](docs/samples/tts_ga_quick_brown_fox_thumb.png)](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/tts_ga_quick_brown_fox.mp4) |
+| "Ship or sheep?" · GA | **84.5** | `ok` | [json](docs/samples/score_ga_ship_or_sheep.json) | [![play](docs/samples/tts_ga_ship_or_sheep_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#tts-ship) |
+| "She sells seashells by the seashore." · GA | **92.4** | `ok` | [json](docs/samples/score_ga_seashells.json) | [![play](docs/samples/tts_ga_seashells_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#tts-seashells) |
+| "The quick brown fox jumps over the lazy dog." · GA | **92.3** | `ok` | [json](docs/samples/score_rp_quick_brown_fox_rp.json) | [![play](docs/samples/tts_ga_quick_brown_fox_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#tts-fox) |
 
 Each fixture carries per-phoneme GOP with timestamps, the four scoring dimensions, the discrete `phrase_match_status`, the pitch overlay, and a `debug` block exposing weights and raw scores.
 
@@ -231,6 +232,7 @@ backend/app/
 
 backend/training/       speechocean762 + WavLM head training utilities
 backend/tests/          pytest, no network (34 tests, all green)
+docs/                   index.html (sample gallery, served via GitHub Pages)
 docs/samples/           audio + JSON fixtures the README links to
 frontend/src/           App Router pages + practice/voice UI + API client
 ```
