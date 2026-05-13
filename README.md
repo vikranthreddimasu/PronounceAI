@@ -100,6 +100,8 @@ Each fixture carries per-phoneme GOP with timestamps, the four scoring dimension
 
 ### 3 · The product UI
 
+![Voice Lab — render any English text in your own voice, in the accent you choose](docs/screenshots/voice-lab.png)
+
 | Route | What it does |
 | --- | --- |
 | `/practice` | Phrase library + free-text recording → score + per-phoneme tape + pitch overlay + actionable tip. |
