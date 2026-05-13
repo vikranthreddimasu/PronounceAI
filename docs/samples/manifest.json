@@ -15,7 +15,8 @@
   "score": [
     "score_ga_seashells.json",
     "score_ga_ship_or_sheep.json",
-    "score_rp_quick_brown_fox_rp.json"
+    "score_rp_quick_brown_fox_rp.json",
+    "score_user_recording.json"
   ],
   "mp4": [
     "tts_ga_quick_brown_fox.mp4",

@@ -195,6 +195,103 @@
     .bts dt:first-child { margin-top: 0; }
   }
 
+  /* Pronunciation-score sample */
+  .overall {
+    margin: 14px 0 18px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .overall .num {
+    font-size: 44px;
+    font-weight: 500;
+    color: var(--fg);
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .overall .num small {
+    font-size: 16px;
+    color: var(--fg-3);
+    letter-spacing: 0;
+    margin-left: 4px;
+  }
+  .overall .label {
+    font-size: 11px;
+    color: var(--fg-3);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .dims {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 14px 0 4px;
+  }
+  .dim {
+    display: grid;
+    grid-template-columns: 132px 1fr 44px;
+    align-items: center;
+    gap: 14px;
+    font-size: 12px;
+  }
+  .dim .name {
+    color: var(--fg-2);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 11px;
+  }
+  .dim .track {
+    height: 4px;
+    background: var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .dim .fill {
+    height: 100%;
+    background: linear-gradient(90deg, #6E4AD9 0%, var(--accent) 100%);
+    border-radius: 2px;
+  }
+  .dim .val {
+    text-align: right;
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+  }
+
+  .mispron {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .mispron li {
+    display: grid;
+    grid-template-columns: 120px 1fr auto;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--fg-2);
+    padding: 8px 12px;
+    background: rgba(184, 156, 255, 0.04);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .mispron code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: var(--fg);
+    letter-spacing: 0.02em;
+  }
+  .mispron .ts {
+    color: var(--fg-3);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+  }
+
   footer {
     margin-top: 96px;
     padding-top: 22px;
@@ -275,6 +372,63 @@
     <dd>Accent control is a property of the source audio, not the speaker. Swap the Kokoro voice and the output accent follows; the speaker stays recognisably the same person.</dd>
     <dt>Validation</dt>
     <dd><code>coverage 1.0 · char-similarity 1.0 · length-ratio 1.0</code>.</dd>
+  </dl>
+</article>
+
+<h2>Pronunciation scoring</h2>
+<p class="lede">The same enrolment audio above, scored as if it were a practice attempt. Real response from <code>POST /api/score</code> — committed verbatim so you can inspect the contract without running the server.</p>
+
+<article class="clip" id="score-user-recording">
+  <div class="clip-head">
+    <div class="clip-title">Live scoring of the enrolment<small>POST /api/score · 8.5 s pipeline</small></div>
+    <div class="clip-meta">GA · 12.2 s audio</div>
+  </div>
+  <p class="quote">"Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river. She sells seashells by the seashore while three thoughtful tourists thought through all new problems."</p>
+  <audio controls preload="metadata" src="samples/voice_user_original.wav"></audio>
+
+  <div class="overall">
+    <div class="num">79.5<small>/100</small></div>
+    <div class="label">Overall · fused score</div>
+  </div>
+
+  <div class="dims">
+    <div class="dim">
+      <div class="name">Phoneme accuracy</div>
+      <div class="track"><div class="fill" style="width: 79.2%"></div></div>
+      <div class="val">79.2</div>
+    </div>
+    <div class="dim">
+      <div class="name">Intonation</div>
+      <div class="track"><div class="fill" style="width: 69.6%"></div></div>
+      <div class="val">69.6</div>
+    </div>
+    <div class="dim">
+      <div class="name">Stress &amp; rhythm</div>
+      <div class="track"><div class="fill" style="width: 100%"></div></div>
+      <div class="val">100</div>
+    </div>
+    <div class="dim">
+      <div class="name">Vowel quality</div>
+      <div class="track"><div class="fill" style="width: 70%"></div></div>
+      <div class="val">70</div>
+    </div>
+  </div>
+
+  <dl class="bts">
+    <dt>Top mispronunciations</dt>
+    <dd>
+      <ul class="mispron">
+        <li><code>/er/</code> low confidence <span class="ts">@ 3.94 s · "river"</span></li>
+        <li><code>/θ/ → /t/</code> substitution <span class="ts">@ 10.56 s · "thought"</span></li>
+        <li><code>/v/ → /l/</code> substitution <span class="ts">@ 3.90 s · "over"</span></li>
+      </ul>
+    </dd>
+    <dt>Actionable tip</dt>
+    <dd>Focus on /er/; your closest detected sound was /er/. Next pass: prioritize pitch movement.</dd>
+    <dt>Phrase match</dt>
+    <dd><code>phrase_match_status: ok</code> · Whisper WER <code>0.062</code> against the target phrase.</dd>
+    <dt>Fusion</dt>
+    <dd><code>0.55 · phoneme + 0.20 · intonation + 0.15 · stress_rhythm + 0.10 · vowel_quality</code> — see <a href="samples/score_user_recording.json">score_user_recording.json</a> for the full 113-phoneme tape, pitch contour, and debug block.</dd>
   </dl>
 </article>
 

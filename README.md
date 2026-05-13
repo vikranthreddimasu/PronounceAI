@@ -90,13 +90,16 @@ CosyVoice 3 voice conversion. The learner records once. The same speaker is then
 
 ### 2 · Pronunciation scoring
 
-Three score JSON fixtures are committed so the response shape is inspectable without running the server:
+Four score JSON fixtures are committed so the response shape is inspectable without running the server. Three come from Kokoro-rendered native audio (the synth-against-self sanity check); the fourth is a real learner recording — the same 12 s enrolment used for the voice clones above, scored end-to-end through `POST /api/score`.
 
 | Phrase · Accent | Overall | Phrase match | JSON |
 | --- | :-: | :-: | --- |
+| **Learner recording (Alex, enrolment)** · GA | **79.5** | `ok` | [score_user_recording.json](docs/samples/score_user_recording.json) |
 | "Ship or sheep?" · GA | **84.5** | `ok` | [score_ga_ship_or_sheep.json](docs/samples/score_ga_ship_or_sheep.json) |
 | "She sells seashells by the seashore." · GA | **92.4** | `ok` | [score_ga_seashells.json](docs/samples/score_ga_seashells.json) |
 | "The quick brown fox jumps over the lazy dog." · GA | **92.3** | `ok` | [score_rp_quick_brown_fox_rp.json](docs/samples/score_rp_quick_brown_fox_rp.json) |
+
+→ **[Hear the learner clip and see the score breakdown](https://vikranthreddimasu.github.io/PronounceAI/#score-user-recording)** (overall · per-dimension bars · top mispronunciations · actionable tip).
 
 Each fixture carries per-phoneme GOP with timestamps, the four scoring dimensions, the discrete `phrase_match_status`, the pitch overlay, and a `debug` block exposing weights and raw scores. The native-accent references that drive the pitch overlay are in the [gallery](https://vikranthreddimasu.github.io/PronounceAI/#tts-ship) too.
 

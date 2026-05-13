@@ -1,0 +1,1084 @@
+{
+  "phonemes": [
+    {
+      "phoneme": "hh",
+      "expected": "hh",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 40,
+      "end_ms": 40
+    },
+    {
+      "phoneme": "ah",
+      "expected": "ah",
+      "gop": -0.325,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 120,
+      "end_ms": 120
+    },
+    {
+      "phoneme": "l",
+      "expected": "l",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 180,
+      "end_ms": 180
+    },
+    {
+      "phoneme": "ow",
+      "expected": "ow",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 300,
+      "end_ms": 300
+    },
+    {
+      "phoneme": "m",
+      "expected": "m",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 580,
+      "end_ms": 580
+    },
+    {
+      "phoneme": "ay",
+      "expected": "ay",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 660,
+      "end_ms": 660
+    },
+    {
+      "phoneme": "n",
+      "expected": "n",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 720,
+      "end_ms": 720
+    },
+    {
+      "phoneme": "ey",
+      "expected": "ey",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 820,
+      "end_ms": 820
+    },
+    {
+      "phoneme": "m",
+      "expected": "m",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 860,
+      "end_ms": 860
+    },
+    {
+      "phoneme": "ih_err",
+      "expected": "ih",
+      "gop": -5.312,
+      "correct": false,
+      "substitution": "ih_err\u2192ih",
+      "start_ms": 920,
+      "end_ms": 920
+    },
+    {
+      "phoneme": "z",
+      "expected": "z",
+      "gop": -0.002,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 960,
+      "end_ms": 960
+    },
+    {
+      "phoneme": "ae",
+      "expected": "ae",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 1120,
+      "end_ms": 1120
+    },
+    {
+      "phoneme": "l",
+      "expected": "l",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 1160,
+      "end_ms": 1160
+    },
+    {
+      "phoneme": "ih_err",
+      "expected": "ah",
+      "gop": -8.498,
+      "correct": false,
+      "substitution": "ih_err\u2192ah",
+      "start_ms": 1260,
+      "end_ms": 1260
+    },
+    {
+      "phoneme": "k",
+      "expected": "k",
+      "gop": -0.004,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 1320,
+      "end_ms": 1320
+    },
+    {
+      "phoneme": "s",
+      "expected": "s",
+      "gop": -0.002,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 1420,
+      "end_ms": 1420
+    },
+    {
+      "phoneme": "dh",
+      "expected": "dh",
+      "gop": -0.01,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 2240,
+      "end_ms": 2240
+    },
+    {
+      "phoneme": "ax",
+      "expected": "ah",
+      "gop": -1.61,
+      "correct": false,
+      "substitution": "ax\u2192ah",
+      "start_ms": 2300,
+      "end_ms": 2300
+    },
+    {
+      "phoneme": "g",
+      "expected": "k",
+      "gop": -2.391,
+      "correct": false,
+      "substitution": "g\u2192k",
+      "start_ms": 2360,
+      "end_ms": 2360
+    },
+    {
+      "phoneme": "r",
+      "expected": "w",
+      "gop": -5.713,
+      "correct": false,
+      "substitution": "r\u2192w",
+      "start_ms": 2400,
+      "end_ms": 2400
+    },
+    {
+      "phoneme": "iy",
+      "expected": "ih",
+      "gop": -2.695,
+      "correct": false,
+      "substitution": "iy\u2192ih",
+      "start_ms": 2480,
+      "end_ms": 2480
+    },
+    {
+      "phoneme": "k",
+      "expected": "k",
+      "gop": -0.246,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 2520,
+      "end_ms": 2520
+    },
+    {
+      "phoneme": "b",
+      "expected": "b",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 2600,
+      "end_ms": 2600
+    },
+    {
+      "phoneme": "r",
+      "expected": "r",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 2620,
+      "end_ms": 2620
+    },
+    {
+      "phoneme": "aw",
+      "expected": "aw",
+      "gop": -0.004,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 2760,
+      "end_ms": 2760
+    },
+    {
+      "phoneme": "n",
+      "expected": "n",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 2800,
+      "end_ms": 2800
+    },
+    {
+      "phoneme": "f",
+      "expected": "f",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 2900,
+      "end_ms": 2900
+    },
+    {
+      "phoneme": "aa",
+      "expected": "aa",
+      "gop": -0.133,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 3080,
+      "end_ms": 3080
+    },
+    {
+      "phoneme": "k",
+      "expected": "k",
+      "gop": -0.014,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 3140,
+      "end_ms": 3140
+    },
+    {
+      "phoneme": "s",
+      "expected": "s",
+      "gop": -0.007,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 3240,
+      "end_ms": 3240
+    },
+    {
+      "phoneme": "jh",
+      "expected": "jh",
+      "gop": -0.004,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 3460,
+      "end_ms": 3460
+    },
+    {
+      "phoneme": "ae",
+      "expected": "ah",
+      "gop": -1.748,
+      "correct": false,
+      "substitution": "ae\u2192ah",
+      "start_ms": 3580,
+      "end_ms": 3580
+    },
+    {
+      "phoneme": "m",
+      "expected": "m",
+      "gop": -0.007,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 3620,
+      "end_ms": 3620
+    },
+    {
+      "phoneme": "p",
+      "expected": "p",
+      "gop": -0.667,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 3640,
+      "end_ms": 3640
+    },
+    {
+      "phoneme": "s",
+      "expected": "s",
+      "gop": -0.11,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 3680,
+      "end_ms": 3680
+    },
+    {
+      "phoneme": "ao",
+      "expected": "ow",
+      "gop": -1.781,
+      "correct": false,
+      "substitution": "ao\u2192ow",
+      "start_ms": 3880,
+      "end_ms": 3880
+    },
+    {
+      "phoneme": "l",
+      "expected": "v",
+      "gop": -9.745,
+      "correct": false,
+      "substitution": "l\u2192v",
+      "start_ms": 3900,
+      "end_ms": 3900
+    },
+    {
+      "phoneme": "er",
+      "expected": "er",
+      "gop": -13.376,
+      "correct": false,
+      "substitution": null,
+      "start_ms": 3940,
+      "end_ms": 3940
+    },
+    {
+      "phoneme": "dh",
+      "expected": "dh",
+      "gop": -0.007,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 3980,
+      "end_ms": 3980
+    },
+    {
+      "phoneme": "ah",
+      "expected": "ah",
+      "gop": -0.01,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4040,
+      "end_ms": 4040
+    },
+    {
+      "phoneme": "l",
+      "expected": "l",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4100,
+      "end_ms": 4100
+    },
+    {
+      "phoneme": "ey",
+      "expected": "ey",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4200,
+      "end_ms": 4200
+    },
+    {
+      "phoneme": "z",
+      "expected": "z",
+      "gop": -0.004,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4260,
+      "end_ms": 4260
+    },
+    {
+      "phoneme": "iy",
+      "expected": "iy",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4340,
+      "end_ms": 4340
+    },
+    {
+      "phoneme": "d",
+      "expected": "d",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4380,
+      "end_ms": 4380
+    },
+    {
+      "phoneme": "ao",
+      "expected": "ao",
+      "gop": -0.036,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4520,
+      "end_ms": 4520
+    },
+    {
+      "phoneme": "g_err",
+      "expected": "g",
+      "gop": -3.194,
+      "correct": false,
+      "substitution": "g_err\u2192g",
+      "start_ms": 4560,
+      "end_ms": 4560
+    },
+    {
+      "phoneme": "b",
+      "expected": "b",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4620,
+      "end_ms": 4620
+    },
+    {
+      "phoneme": "ay",
+      "expected": "ay",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4700,
+      "end_ms": 4700
+    },
+    {
+      "phoneme": "dh",
+      "expected": "dh",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4760,
+      "end_ms": 4760
+    },
+    {
+      "phoneme": "ax",
+      "expected": "ah",
+      "gop": -5.606,
+      "correct": false,
+      "substitution": "ax\u2192ah",
+      "start_ms": 4820,
+      "end_ms": 4820
+    },
+    {
+      "phoneme": "r",
+      "expected": "r",
+      "gop": -0.119,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4840,
+      "end_ms": 4840
+    },
+    {
+      "phoneme": "ih",
+      "expected": "ih",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4920,
+      "end_ms": 4920
+    },
+    {
+      "phoneme": "v",
+      "expected": "v",
+      "gop": -0.014,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 4960,
+      "end_ms": 4960
+    },
+    {
+      "phoneme": "ax_err",
+      "expected": "er",
+      "gop": -8.277,
+      "correct": false,
+      "substitution": "ax_err\u2192er",
+      "start_ms": 5060,
+      "end_ms": 5060
+    },
+    {
+      "phoneme": "sh",
+      "expected": "sh",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 5980,
+      "end_ms": 5980
+    },
+    {
+      "phoneme": "iy",
+      "expected": "iy",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 6100,
+      "end_ms": 6100
+    },
+    {
+      "phoneme": "s",
+      "expected": "s",
+      "gop": -0.007,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 6160,
+      "end_ms": 6160
+    },
+    {
+      "phoneme": "eh",
+      "expected": "eh",
+      "gop": -0.002,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 6320,
+      "end_ms": 6320
+    },
+    {
+      "phoneme": "l",
+      "expected": "l",
+      "gop": -0.002,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 6360,
+      "end_ms": 6360
+    },
+    {
+      "phoneme": "z",
+      "expected": "z",
+      "gop": -0.104,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 6440,
+      "end_ms": 6440
+    },
+    {
+      "phoneme": "s",
+      "expected": "s",
+      "gop": -0.002,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7000,
+      "end_ms": 7000
+    },
+    {
+      "phoneme": "iy",
+      "expected": "iy",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7140,
+      "end_ms": 7140
+    },
+    {
+      "phoneme": "sh",
+      "expected": "sh",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7220,
+      "end_ms": 7220
+    },
+    {
+      "phoneme": "ow",
+      "expected": "eh",
+      "gop": -6.569,
+      "correct": false,
+      "substitution": "ow\u2192eh",
+      "start_ms": 7360,
+      "end_ms": 7360
+    },
+    {
+      "phoneme": "l",
+      "expected": "l",
+      "gop": -1.194,
+      "correct": false,
+      "substitution": null,
+      "start_ms": 7400,
+      "end_ms": 7400
+    },
+    {
+      "phoneme": "z",
+      "expected": "z",
+      "gop": -0.012,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7460,
+      "end_ms": 7460
+    },
+    {
+      "phoneme": "b",
+      "expected": "b",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7540,
+      "end_ms": 7540
+    },
+    {
+      "phoneme": "ay",
+      "expected": "ay",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7620,
+      "end_ms": 7620
+    },
+    {
+      "phoneme": "dh",
+      "expected": "dh",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7660,
+      "end_ms": 7660
+    },
+    {
+      "phoneme": "ah",
+      "expected": "ah",
+      "gop": -0.569,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7740,
+      "end_ms": 7740
+    },
+    {
+      "phoneme": "s",
+      "expected": "s",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7800,
+      "end_ms": 7800
+    },
+    {
+      "phoneme": "iy",
+      "expected": "iy",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 7940,
+      "end_ms": 7940
+    },
+    {
+      "phoneme": "sh",
+      "expected": "sh",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 8020,
+      "end_ms": 8020
+    },
+    {
+      "phoneme": "ow",
+      "expected": "ao",
+      "gop": -3.913,
+      "correct": false,
+      "substitution": "ow\u2192ao",
+      "start_ms": 8240,
+      "end_ms": 8240
+    },
+    {
+      "phoneme": "r",
+      "expected": "r",
+      "gop": -0.589,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 8260,
+      "end_ms": 8260
+    },
+    {
+      "phoneme": "w",
+      "expected": "w",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 8660,
+      "end_ms": 8660
+    },
+    {
+      "phoneme": "ay",
+      "expected": "ay",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 8740,
+      "end_ms": 8740
+    },
+    {
+      "phoneme": "l",
+      "expected": "l",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 8780,
+      "end_ms": 8780
+    },
+    {
+      "phoneme": "th",
+      "expected": "th",
+      "gop": -0.026,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 8900,
+      "end_ms": 8900
+    },
+    {
+      "phoneme": "r",
+      "expected": "r",
+      "gop": -0.002,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 8960,
+      "end_ms": 8960
+    },
+    {
+      "phoneme": "iy",
+      "expected": "iy",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 9060,
+      "end_ms": 9060
+    },
+    {
+      "phoneme": "d",
+      "expected": "th",
+      "gop": -5.287,
+      "correct": false,
+      "substitution": "d\u2192th",
+      "start_ms": 9160,
+      "end_ms": 9160
+    },
+    {
+      "phoneme": "ao",
+      "expected": "ao",
+      "gop": -0.093,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 9280,
+      "end_ms": 9280
+    },
+    {
+      "phoneme": "t",
+      "expected": "t",
+      "gop": -0.117,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 9340,
+      "end_ms": 9340
+    },
+    {
+      "phoneme": "f",
+      "expected": "f",
+      "gop": -0.002,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 9400,
+      "end_ms": 9400
+    },
+    {
+      "phoneme": "ah",
+      "expected": "ah",
+      "gop": -0.296,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 9480,
+      "end_ms": 9480
+    },
+    {
+      "phoneme": "l",
+      "expected": "l",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 9500,
+      "end_ms": 9500
+    },
+    {
+      "phoneme": "d",
+      "expected": "t",
+      "gop": -2.83,
+      "correct": false,
+      "substitution": "d\u2192t",
+      "start_ms": 9600,
+      "end_ms": 9600
+    },
+    {
+      "phoneme": "uh",
+      "expected": "uh",
+      "gop": -0.277,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 9720,
+      "end_ms": 9720
+    },
+    {
+      "phoneme": "r",
+      "expected": "r",
+      "gop": -0.12,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 9780,
+      "end_ms": 9800
+    },
+    {
+      "phoneme": "ih_err",
+      "expected": "ah",
+      "gop": -7.1,
+      "correct": false,
+      "substitution": "ih_err\u2192ah",
+      "start_ms": 9900,
+      "end_ms": 9900
+    },
+    {
+      "phoneme": "s",
+      "expected": "s",
+      "gop": -0.08,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 9960,
+      "end_ms": 9960
+    },
+    {
+      "phoneme": "t_err",
+      "expected": "t",
+      "gop": -1.184,
+      "correct": false,
+      "substitution": "t_err\u2192t",
+      "start_ms": 10120,
+      "end_ms": 10120
+    },
+    {
+      "phoneme": "s",
+      "expected": "s",
+      "gop": -6.967,
+      "correct": false,
+      "substitution": null,
+      "start_ms": 10160,
+      "end_ms": 10160
+    },
+    {
+      "phoneme": "t",
+      "expected": "th",
+      "gop": -12.921,
+      "correct": false,
+      "substitution": "t\u2192th",
+      "start_ms": 10560,
+      "end_ms": 10560
+    },
+    {
+      "phoneme": "ao",
+      "expected": "ao",
+      "gop": -0.037,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 10700,
+      "end_ms": 10700
+    },
+    {
+      "phoneme": "t_err",
+      "expected": "t",
+      "gop": -1.102,
+      "correct": false,
+      "substitution": "t_err\u2192t",
+      "start_ms": 10780,
+      "end_ms": 10780
+    },
+    {
+      "phoneme": "th",
+      "expected": "th",
+      "gop": -0.011,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 10880,
+      "end_ms": 10880
+    },
+    {
+      "phoneme": "r",
+      "expected": "r",
+      "gop": -0.009,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 10940,
+      "end_ms": 10940
+    },
+    {
+      "phoneme": "uw",
+      "expected": "uw",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 11060,
+      "end_ms": 11060
+    },
+    {
+      "phoneme": "ao",
+      "expected": "ao",
+      "gop": -0.289,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 11320,
+      "end_ms": 11320
+    },
+    {
+      "phoneme": "r",
+      "expected": "l",
+      "gop": -2.46,
+      "correct": false,
+      "substitution": "r\u2192l",
+      "start_ms": 11360,
+      "end_ms": 11360
+    },
+    {
+      "phoneme": "n",
+      "expected": "n",
+      "gop": -0.516,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 11420,
+      "end_ms": 11420
+    },
+    {
+      "phoneme": "iy",
+      "expected": "uw",
+      "gop": -9.354,
+      "correct": false,
+      "substitution": "iy\u2192uw",
+      "start_ms": 11500,
+      "end_ms": 11500
+    },
+    {
+      "phoneme": "p",
+      "expected": "p",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 11560,
+      "end_ms": 11560
+    },
+    {
+      "phoneme": "r",
+      "expected": "r",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 11580,
+      "end_ms": 11580
+    },
+    {
+      "phoneme": "aa",
+      "expected": "aa",
+      "gop": -0.001,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 11700,
+      "end_ms": 11700
+    },
+    {
+      "phoneme": "b",
+      "expected": "b",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 11740,
+      "end_ms": 11740
+    },
+    {
+      "phoneme": "l",
+      "expected": "l",
+      "gop": -0.018,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 11780,
+      "end_ms": 11780
+    },
+    {
+      "phoneme": "ax",
+      "expected": "ah",
+      "gop": -1.479,
+      "correct": false,
+      "substitution": "ax\u2192ah",
+      "start_ms": 11860,
+      "end_ms": 11860
+    },
+    {
+      "phoneme": "m",
+      "expected": "m",
+      "gop": -0.0,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 11900,
+      "end_ms": 11900
+    },
+    {
+      "phoneme": "z",
+      "expected": "z",
+      "gop": -0.009,
+      "correct": true,
+      "substitution": null,
+      "start_ms": 12020,
+      "end_ms": 12020
+    }
+  ],
+  "scores": {
+    "phoneme_accuracy": 79.2,
+    "intonation": 69.6,
+    "stress_rhythm": 100.0,
+    "vowel_quality": 70.0
+  },
+  "feedback": [
+    {
+      "text": "Focus on /er/; your closest detected sound was /er/.",
+      "timestamp_ms": 3940
+    },
+    {
+      "text": "Next pass: prioritize pitch movement."
+    }
+  ],
+  "overall": 79.5,
+  "pitch_contour": {
+    "user": "<80 z-scored values, see backend response>",
+    "native": "<80 z-scored values, see backend response>",
+    "duration_ms": 11869
+  },
+  "transcript": {
+    "text": "Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river. She sells seashells by the seashore while three thoughtful tourists thought through thorny problems.",
+    "language_probability": null
+  },
+  "wer": 0.062,
+  "phrase_match_status": "ok",
+  "debug": {
+    "elapsed_ms": 8496,
+    "stage_ms": {
+      "phoneme": 6982,
+      "native_f0": 8476,
+      "prosody": 6,
+      "whisper": 4972
+    },
+    "cache_hit": false,
+    "latency_mode": {
+      "asr": "fast",
+      "formants": false,
+      "wavlm": "auto",
+      "response_cache": true
+    },
+    "accent_score": null,
+    "phrase_match": {
+      "wer": 0.062,
+      "char_similarity": 0.969,
+      "word_coverage": 0.929,
+      "phrase_match": 94.6
+    },
+    "learned_assessment": null,
+    "score_gates": [],
+    "raw_overall": 79.5,
+    "raw_phoneme_accuracy": 79.2,
+    "weights": {
+      "phoneme_accuracy": 0.55,
+      "intonation": 0.2,
+      "stress_rhythm": 0.15,
+      "vowel_quality": 0.1,
+      "learned_overall_blend": 0.35
+    },
+    "npvi": 50.0,
+    "speech_rate_sps": 3.45
+  }
+}
