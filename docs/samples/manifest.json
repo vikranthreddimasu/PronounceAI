@@ -12,11 +12,27 @@
     "voice_calm_rp.wav",
     "voice_happy_ga.wav",
     "voice_sad_rp.wav",
+    "voice_user_clone_ga.wav",
+    "voice_user_original.wav",
     "voice_whisper_ga.wav"
   ],
   "score": [
     "score_ga_seashells.json",
     "score_ga_ship_or_sheep.json",
     "score_rp_quick_brown_fox_rp.json"
+  ],
+  "mp4": [
+    "tts_ga_quick_brown_fox.mp4",
+    "tts_ga_seashells.mp4",
+    "tts_ga_ship_or_sheep.mp4",
+    "tts_rp_fastest_route.mp4",
+    "tts_rp_ship_or_sheep.mp4",
+    "voice_angry_ga.mp4",
+    "voice_calm_rp.mp4",
+    "voice_happy_ga.mp4",
+    "voice_sad_rp.mp4",
+    "voice_user_clone_ga.mp4",
+    "voice_user_original.mp4",
+    "voice_whisper_ga.mp4"
   ]
 }

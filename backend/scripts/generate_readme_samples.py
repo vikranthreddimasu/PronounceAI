@@ -4,16 +4,20 @@ Outputs land under ``docs/samples/`` (relative to the repo root). Each artifact
 is generated from a deterministic source so the README gallery stays in sync
 with the code:
 
-  * tts_<accent>_<slug>.wav     — Kokoro native reference
-  * voice_<emotion>_<accent>.wav — CosyVoice 3 voice clone (if mlx_audio loads)
-  * score_<slug>.json           — /api/score response (Kokoro audio in)
+  * tts_<accent>_<slug>.wav      — Kokoro native reference
+  * voice_<emotion>_<accent>.wav — CosyVoice 3 voice clone
+  * score_<slug>.json            — /api/score response (Kokoro audio in)
+
+Each WAV is also encoded as an MP4 (waveform visualisation + audio track) so
+the README gallery plays inline on github.com — only ``<video>`` tags render
+inline in GitHub-flavoured Markdown.
 
 Run from ``backend/``:
 
     source .venv/bin/activate
     python scripts/generate_readme_samples.py
 
-Idempotent: re-running overwrites existing samples.
+Idempotent: re-running overwrites existing samples. ffmpeg must be on PATH.
 """
 from __future__ import annotations
 
@@ -22,6 +26,8 @@ import io
 import json
 import logging
 import re
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -260,6 +266,32 @@ def gen_score_samples() -> list[dict]:
     return out
 
 
+def wav_to_mp4(wav_path: Path) -> Path | None:
+    """Encode WAV → MP4 with a violet waveform overlay so the README plays it inline."""
+    if shutil.which("ffmpeg") is None:
+        logger.warning("ffmpeg not on PATH — skipping MP4 conversion for %s", wav_path.name)
+        return None
+    mp4_path = wav_path.with_suffix(".mp4")
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_path),
+        "-filter_complex",
+        "color=c=0x0D1117:s=1280x200:r=25[bg];"
+        "[0:a]showwaves=s=1280x200:mode=line:colors=0xA78BFA:rate=25,format=yuva420p[waves];"
+        "[bg][waves]overlay=shortest=1,format=yuv420p[v]",
+        "-map", "[v]", "-map", "0:a",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-shortest", "-movflags", "+faststart",
+        str(mp4_path),
+    ]
+    res = subprocess.run(cmd, capture_output=True)
+    if res.returncode != 0:
+        logger.warning("ffmpeg failed for %s: %s", wav_path.name, res.stderr.decode(errors="ignore")[:200])
+        return None
+    logger.info("wrote %s", mp4_path.relative_to(REPO_ROOT))
+    return mp4_path
+
+
 def main() -> None:
     print(">>> Generating TTS samples")
     tts = gen_tts_samples()
@@ -273,11 +305,19 @@ def main() -> None:
     voice = gen_voice_clone_samples()
     print(f"    {len(voice)} voice-clone clips")
 
+    print(">>> Encoding WAV → MP4 (waveform overlay) for GitHub inline playback")
+    mp4_count = 0
+    for wav in sorted(SAMPLES_DIR.glob("*.wav")):
+        if wav_to_mp4(wav) is not None:
+            mp4_count += 1
+    print(f"    {mp4_count} MP4 files")
+
     manifest = {
         "generated_by": "backend/scripts/generate_readme_samples.py",
-        "tts": tts,
-        "score": scores,
-        "voice_clone": voice,
+        "tts": sorted(p.name for p in SAMPLES_DIR.glob("tts_*.wav")),
+        "voice_clone": sorted(p.name for p in SAMPLES_DIR.glob("voice_*.wav")),
+        "score": sorted(p.name for p in SAMPLES_DIR.glob("score_*.json")),
+        "mp4": sorted(p.name for p in SAMPLES_DIR.glob("*.mp4")),
     }
     manifest_path = SAMPLES_DIR / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
