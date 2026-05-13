@@ -37,6 +37,7 @@ import numpy as np
 import resampy
 import soundfile as sf
 
+from app.utils.kokoro_speaker import synth_array_at
 from app.utils.text_metrics import phrase_match_metrics, word_tokens
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,13 @@ _INSTRUCT_LEAK_TERMS = (
     "speak excitedly",
     "speak calmly",
     "in a whisper",
+    # terse emotion tags can also be spoken literally by the model
+    "happy",
+    "sad",
+    "angry",
+    "excited",
+    "calm",
+    "whisper",
 )
 
 # Verbose forms kept ONLY for the legacy clone() shim; not used by speak().
@@ -97,7 +105,6 @@ ACCENT_INSTRUCTIONS: dict[str, str] = {
     "RP": "British Received Pronunciation, BBC newsreader accent.",
 }
 
-KOKORO_SR = 24_000
 COSYVOICE_SR = 24_000
 COSYVOICE3_ZERO_SHOT_PREFIX = "You are a helpful assistant.<|endofprompt|>"
 
@@ -105,17 +112,6 @@ COSYVOICE3_ZERO_SHOT_PREFIX = "You are a helpful assistant.<|endofprompt|>"
 MIN_WORD_COVERAGE = 0.80   # tolerate proper-name ASR variants
 MAX_LENGTH_RATIO = 1.45    # transcript >1.45x longer than input = hallucination
 MIN_SEQUENCE_SIM = 0.62    # character similarity over normalized text
-
-
-def _mode_order(env_name: str, default: str) -> tuple[str, ...]:
-    valid = {"vc", "instruct", "zero_shot"}
-    raw = os.getenv(env_name, default)
-    order = tuple(mode.strip().lower() for mode in raw.split(",") if mode.strip())
-    return tuple(mode for mode in order if mode in valid) or tuple(default.split(","))
-
-
-TARGET_ACCENT_ORDER = _mode_order("VOICE_TARGET_ACCENT_ORDER", "vc,instruct")
-NATURAL_ORDER = _mode_order("VOICE_NATURAL_ORDER", "zero_shot,instruct,vc")
 
 
 @dataclass(frozen=True)
@@ -136,7 +132,6 @@ class VoiceClone:
         self.model_id = model_id
         self._whisper = whisper_engine
         self._warmed = False
-        self._kokoro_pipes: dict[str, "object"] = {}
 
     def supported_accents(self) -> list[str]:
         return list(KOKORO_VOICE_MAP.keys())
@@ -182,31 +177,11 @@ class VoiceClone:
 
     # ─── Kokoro accent rendering (used by the VC fallback) ─────────────
 
-    def _kokoro_pipeline(self, lang_code: str):
-        pipe = self._kokoro_pipes.get(lang_code)
-        if pipe is None:
-            from kokoro import KPipeline
-            pipe = KPipeline(lang_code=lang_code)
-            self._kokoro_pipes[lang_code] = pipe
-        return pipe
-
     def _render_accent_audio(self, text: str, accent: str) -> Path:
         accent = accent.upper()
         if accent not in KOKORO_VOICE_MAP:
             raise ValueError(f"Unsupported accent: {accent}")
-        lang_code, voice = KOKORO_VOICE_MAP[accent]
-        pipe = self._kokoro_pipeline(lang_code)
-
-        chunks: list[np.ndarray] = []
-        for _, _, audio in pipe(text, voice=voice, speed=1.0):
-            if hasattr(audio, "detach"):
-                audio = audio.detach().cpu().numpy()
-            chunks.append(np.asarray(audio, dtype=np.float32))
-        if not chunks:
-            raise RuntimeError(f"Kokoro produced no audio for accent={accent}")
-        wav = np.concatenate(chunks).astype(np.float32)
-        if KOKORO_SR != COSYVOICE_SR:
-            wav = resampy.resample(wav, KOKORO_SR, COSYVOICE_SR).astype(np.float32)
+        wav = synth_array_at(text, accent, COSYVOICE_SR, speed=1.0)
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         sf.write(tmp.name, wav, COSYVOICE_SR, format="WAV", subtype="PCM_16")
         tmp.close()
@@ -308,6 +283,62 @@ class VoiceClone:
         return " ".join(word_tokens(s))
 
     @staticmethod
+    def _strip_instruct_tag_from_transcript(tag: str, transcript: str) -> str:
+        """Remove leaked instruct words (accent + emotion) from the transcript
+to avoid validation penalising harmless style-tag recitation.
+        """
+        if not tag or not transcript:
+            return transcript
+        # Split tag into individual words; strip punctuation before comparing
+        tag_words = {
+            re.sub(r"[^a-zA-Z]", "", w).lower()
+            for w in tag.split()
+            if len(re.sub(r"[^a-zA-Z]", "", w)) >= 2
+        }
+        words = transcript.split()
+        filtered: list[str] = []
+        for w in words:
+            core = re.sub(r"[^a-zA-Z]", "", w).lower()
+            if core and core in tag_words and len(core) >= 3:
+                continue
+            filtered.append(w)
+        return " ".join(filtered)
+
+    @staticmethod
+    def _trim_silence(
+        wav: np.ndarray,
+        sr: int = COSYVOICE_SR,
+        threshold: float = 0.015,
+        frame_ms: int = 20,
+        pre_roll_ms: int = 60,
+        post_roll_ms: int = 60,
+    ) -> np.ndarray:
+        """Trim leading / trailing digital silence so the audio starts at speech
+        onset and ends on the last voiced frame."""
+        if wav.size < sr // 10:
+            return wav
+        frame = max(1, int(sr * frame_ms / 1000))
+        usable = len(wav) - (len(wav) % frame)
+        if usable <= frame:
+            return wav
+        frames = wav[:usable].reshape(-1, frame)
+        rms = np.sqrt(np.mean(frames ** 2, axis=1))
+        if rms.size == 0:
+            return wav
+        peak = float(rms.max())
+        thresh = max(threshold, peak * 0.12)
+        voiced = np.flatnonzero(rms >= thresh)
+        if voiced.size == 0:
+            return wav
+        pre_frames = max(1, int(pre_roll_ms / frame_ms))
+        post_frames = max(1, int(post_roll_ms / frame_ms))
+        start_frame = max(0, int(voiced[0]) - pre_frames)
+        end_frame = min(len(rms), int(voiced[-1]) + 1 + post_frames)
+        start_sample = start_frame * frame
+        end_sample = min(end_frame * frame, len(wav))
+        return wav[start_sample:end_sample]
+
+    @staticmethod
     def _word_metrics(expected: str, actual: str) -> tuple[float, float, float]:
         e_words = word_tokens(expected)
         a_words = word_tokens(actual)
@@ -376,6 +407,19 @@ class VoiceClone:
         }
 
     @staticmethod
+    def _trim_and_rewrite(audio_path: Path) -> Path:
+        """Trim leading / trailing silence from a WAV and overwrite in place."""
+        try:
+            wav, sr = sf.read(str(audio_path), dtype="float32")
+            if wav.ndim > 1:
+                wav = wav.mean(axis=1)
+            trimmed = VoiceClone._trim_silence(wav, sr=sr)
+            sf.write(str(audio_path), trimmed, sr, format="WAV", subtype="PCM_16")
+        except Exception as e:
+            logger.warning(f"voice_clone: silence trim failed — {e}")
+        return audio_path
+
+    @staticmethod
     def _estimate_word_timings(text: str, audio_path: Path) -> list[dict]:
         tokens = word_tokens(text)
         if not tokens:
@@ -395,25 +439,35 @@ class VoiceClone:
             for i, word in enumerate(tokens)
         ]
 
-    def _timings_for_output(
-        self,
-        expected_text: str,
-        audio_path: Path,
-        min_coverage: float = 0.55,
-    ) -> tuple[list[dict], dict]:
-        stt = self._transcribe_with_words(audio_path)
-        _, metrics = self._validate(expected_text, stt.get("text", ""))
-        words = stt.get("words", []) or []
-        if words and metrics["coverage"] >= min_coverage:
-            return words, metrics
-        return self._estimate_word_timings(expected_text, audio_path), metrics
-
     @staticmethod
-    def _strategy_order(strategy: str) -> tuple[str, tuple[str, ...]]:
+    def _strategy_name(strategy: str) -> str:
         normalized = (strategy or "target_accent").strip().lower().replace("-", "_")
         if normalized in {"natural", "natural_clone", "zero_shot"}:
-            return "natural", NATURAL_ORDER
-        return "target_accent", TARGET_ACCENT_ORDER
+            return "natural"
+        return "target_accent"
+
+    @classmethod
+    def _select_mode(
+        cls,
+        strategy_name: str,
+        emotion: str,
+        ref_text: str,
+    ) -> str:
+        """Pick exactly one synthesis mode based on the user-facing knobs.
+
+        Mode selection rules — there is no fallback chain; we run the chosen
+        mode once and return the audio + metrics so the caller can decide
+        whether to surface a warning.
+
+          * non-neutral emotion → ``instruct`` (only mode that carries emotion)
+          * ``strategy=natural`` with a real ref_text → ``zero_shot``
+          * everything else → ``vc`` (deterministic accent transfer)
+        """
+        if emotion != DEFAULT_EMOTION:
+            return "instruct"
+        if strategy_name == "natural" and ref_text.strip():
+            return "zero_shot"
+        return "vc"
 
     # ─── Public entry point ────────────────────────────────────────────
 
@@ -427,13 +481,12 @@ class VoiceClone:
         emotion: str = DEFAULT_EMOTION,
         out_path: str | Path | None = None,
     ) -> VoiceSynthesisResult:
-        """Synthesize `text` in the user's voice.
+        """Synthesize ``text`` in the user's voice + target accent.
 
-        `strategy="target_accent"` uses VC-first for accent consistency.
-        `strategy="natural"` uses zero-shot first and preserves the enrolled
-        accent more strongly. `emotion` is a key from EMOTION_TAGS — anything
-        other than "neutral" forces instruct-first because VC source audio
-        (Kokoro) is prosodically flat.
+        One mode runs per call (no retry chain). Selection rules live in
+        ``_select_mode``. The synthesised audio is post-processed (silence
+        trim) and passed through a single Whisper STT call that produces
+        both the validation transcript and the per-word timings.
         """
         accent = accent.upper()
         if accent not in KOKORO_VOICE_MAP:
@@ -444,86 +497,53 @@ class VoiceClone:
             raise FileNotFoundError(f"Reference audio not found: {ref_path}")
 
         t_total = time.perf_counter()
-        strategy_name, order = self._strategy_order(strategy)
-        if emotion != DEFAULT_EMOTION:
-            # VC erases emotion (flat Kokoro source). Zero-shot ignores
-            # instruct_text. Only instruct mode carries the emotion clause.
-            order = ("instruct",) + tuple(m for m in order if m != "instruct")
+        strategy_name = self._strategy_name(strategy)
+        mode = self._select_mode(strategy_name, emotion, ref_text)
 
         # Inline prosody markers (<laughter>, [breath]) pass through to the
-        # synth but must be stripped from the text used for validation —
-        # whisper transcripts won't contain them.
+        # synth but must be stripped from validation text since the Whisper
+        # transcript won't contain them.
         validation_text = self._strip_inline_markers(text)
 
-        for mode in order:
-            if mode == "zero_shot" and not ref_text.strip():
-                continue
-            if mode == "vc":
-                t0 = time.perf_counter()
-                try:
-                    out = self._speak_vc(text, ref_path, accent)
-                    t_vc = time.perf_counter() - t0
-                    t1 = time.perf_counter()
-                    words, metrics = self._timings_for_output(validation_text, out)
-                    t_stt = time.perf_counter() - t1
-                    logger.info(
-                        f"voice_clone.speak: text={len(text)}c accent={accent} "
-                        f"emotion={emotion} strategy={strategy_name} mode=vc "
-                        f"({t_vc:.1f}s synth + {t_stt:.1f}s stt, "
-                        f"total {time.perf_counter()-t_total:.1f}s) metrics={metrics}"
-                    )
-                    return VoiceSynthesisResult(
-                        path=out,
-                        words=words,
-                        mode="vc",
-                        strategy=strategy_name,
-                        metrics=metrics,
-                    )
-                except Exception as e:
-                    logger.warning(f"voice_clone.speak: vc failed — {e}")
-                    continue
+        t0 = time.perf_counter()
+        if mode == "vc":
+            path = self._speak_vc(text, ref_path, accent)
+        elif mode == "zero_shot":
+            path = self._speak_zero_shot(text, ref_path, ref_text)
+        else:  # instruct
+            path = self._speak_instruct(text, ref_path, accent, emotion)
+        t_synth = time.perf_counter() - t0
 
-            path: Optional[Path] = None
-            t0 = time.perf_counter()
-            try:
-                if mode == "zero_shot":
-                    path = self._speak_zero_shot(text, ref_path, ref_text)
-                else:
-                    path = self._speak_instruct(text, ref_path, accent, emotion)
-                t_synth = time.perf_counter() - t0
-            except Exception as e:
-                t_synth = time.perf_counter() - t0
-                logger.warning(f"voice_clone.speak: {mode} failed in {t_synth:.1f}s — {e}")
-                continue
+        # Single STT pass — provides both the validation transcript and the
+        # per-word timings the frontend overlays.
+        t1 = time.perf_counter()
+        stt = self._transcribe_with_words(path)
+        t_stt = time.perf_counter() - t1
 
-            t1 = time.perf_counter()
-            stt = self._transcribe_with_words(path)
-            t_val = time.perf_counter() - t1
-            passes, metrics = self._validate(validation_text, stt.get("text", ""))
-            if passes:
-                logger.info(
-                    f"voice_clone.speak: text={len(text)}c accent={accent} "
-                    f"emotion={emotion} strategy={strategy_name} mode={mode} "
-                    f"({t_synth:.1f}s synth + {t_val:.1f}s stt) "
-                    f"metrics={metrics}"
-                )
-                words = stt.get("words", []) or self._estimate_word_timings(validation_text, path)
-                return VoiceSynthesisResult(
-                    path=path,
-                    words=words,
-                    mode=mode,
-                    strategy=strategy_name,
-                    metrics=metrics,
-                )
-            logger.info(
-                f"voice_clone.speak: {mode} failed validation in {t_val:.1f}s — {metrics}"
-            )
-            try:
-                path.unlink(missing_ok=True)
-            except Exception:
-                pass
+        raw_transcript = stt.get("text", "")
+        if mode == "instruct":
+            tag_words = self._compose_instruct_tag(accent, emotion)
+            clean_transcript = self._strip_instruct_tag_from_transcript(tag_words, raw_transcript)
+        else:
+            clean_transcript = raw_transcript
+        _passes, metrics = self._validate(validation_text, clean_transcript)
 
-        raise RuntimeError(f"No voice synthesis mode succeeded (strategy={strategy_name}, order={order})")
+        trimmed_path = self._trim_and_rewrite(path)
+        words = stt.get("words", []) or self._estimate_word_timings(validation_text, trimmed_path)
+
+        logger.info(
+            f"voice_clone.speak: text={len(text)}c accent={accent} emotion={emotion} "
+            f"strategy={strategy_name} mode={mode} "
+            f"({t_synth:.1f}s synth + {t_stt:.1f}s stt, total {time.perf_counter()-t_total:.1f}s) "
+            f"metrics={metrics}"
+        )
+        return VoiceSynthesisResult(
+            path=trimmed_path,
+            words=words,
+            mode=mode,
+            strategy=strategy_name,
+            metrics=metrics,
+        )
 
     # ─── Legacy compat ─────────────────────────────────────────────────
 

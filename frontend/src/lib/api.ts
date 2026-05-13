@@ -17,7 +17,6 @@ const FORCE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "1";
 const MAX_AUDIO_CACHE = 16;
 
 const nativeAudioCache = new Map<string, Promise<Blob>>();
-const conversionCache = new WeakMap<Blob, Map<string, Promise<Blob>>>();
 
 function remember<K, V>(map: Map<K, V>, key: K, value: V, max = MAX_AUDIO_CACHE): V {
   if (map.has(key)) map.delete(key);
@@ -284,77 +283,5 @@ export function prewarmPhrase(text: string, accent: "GA" | "RP", opts?: WarmPref
     signal: opts?.signal,
   }).catch(() => {
     // Best-effort only; scoring still works without the warm cache.
-  });
-}
-
-/**
- * Convert the user's recording into the target accent using kNN-VC on the backend.
- * Returns a Blob (audio/wav). Caller is responsible for object-URL lifecycle.
- * In mock mode this throws so the UI can show a "live only" hint.
- *
- * When `signal` is passed, caching is skipped so cancellation does not strand other callers on a shared Blob.
- */
-export async function convertAccent(
-  audioBlob: Blob,
-  accent: "GA" | "RP",
-  options?: { signal?: AbortSignal }
-): Promise<Blob> {
-  if (isMockMode()) {
-    throw new Error("Accent conversion requires the live backend (mock mode is off).");
-  }
-
-  return getConvertedAccent(audioBlob, accent, options?.signal);
-}
-
-function getConvertedAccent(audioBlob: Blob, accent: "GA" | "RP", signal?: AbortSignal): Promise<Blob> {
-  if (signal) {
-    const form = new FormData();
-    form.append("audio", audioBlob, "recording.webm");
-    form.append("accent", accent);
-    return fetch(`${API_URL}/api/accent-convert`, {
-      method: "POST",
-      body: form,
-      signal,
-    }).then(async (res) => {
-      if (!res.ok) {
-        const msg = await res.text().catch(() => res.statusText);
-        throw new Error(`Accent conversion failed: ${msg}`);
-      }
-      return res.blob();
-    });
-  }
-
-  let byAccent = conversionCache.get(audioBlob);
-  if (!byAccent) {
-    byAccent = new Map();
-    conversionCache.set(audioBlob, byAccent);
-  }
-  const cached = byAccent.get(accent);
-  if (cached) return cached;
-
-  const form = new FormData();
-  form.append("audio", audioBlob, "recording.webm");
-  form.append("accent", accent);
-  const promise = fetch(`${API_URL}/api/accent-convert`, {
-    method: "POST",
-    body: form,
-  }).then(async (res) => {
-    if (!res.ok) {
-      const msg = await res.text().catch(() => res.statusText);
-      throw new Error(`Accent conversion failed: ${msg}`);
-    }
-    return res.blob();
-  }).catch((error) => {
-    byAccent.delete(accent);
-    throw error;
-  });
-  byAccent.set(accent, promise);
-  return promise;
-}
-
-export function preconvertAccent(audioBlob: Blob | null, accent: "GA" | "RP"): void {
-  if (!audioBlob || isMockMode()) return;
-  getConvertedAccent(audioBlob, accent).catch(() => {
-    conversionCache.get(audioBlob)?.delete(accent);
   });
 }

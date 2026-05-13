@@ -1,0 +1,22 @@
+{
+  "generated_by": "backend/scripts/generate_readme_samples.py",
+  "tts": [
+    "tts_ga_quick_brown_fox.wav",
+    "tts_ga_seashells.wav",
+    "tts_ga_ship_or_sheep.wav",
+    "tts_rp_fastest_route.wav",
+    "tts_rp_ship_or_sheep.wav"
+  ],
+  "voice_clone": [
+    "voice_angry_ga.wav",
+    "voice_calm_rp.wav",
+    "voice_happy_ga.wav",
+    "voice_sad_rp.wav",
+    "voice_whisper_ga.wav"
+  ],
+  "score": [
+    "score_ga_seashells.json",
+    "score_ga_ship_or_sheep.json",
+    "score_rp_quick_brown_fox_rp.json"
+  ]
+}

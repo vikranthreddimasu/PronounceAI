@@ -3,7 +3,13 @@ __pycache__/
 *.pyc
 *.pyo
 .env.local
+# Runtime disk caches (native_f0, voice_synth). Source package app/cache/ is
+# tracked — keep that exception below.
 cache/
+!app/cache/
+!app/cache/**
+# But still drop bytecode under the tracked source package.
+app/cache/__pycache__/
 checkpoints/*.pt
 checkpoints/*.jit
 checkpoints/*.onnx

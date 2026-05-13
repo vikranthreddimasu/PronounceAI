@@ -7,6 +7,7 @@ import numpy as np
 import soundfile as sf
 
 import app.api.score as score_mod
+import app.scoring.pipeline as pipeline_mod
 from app.models.phoneme_engine import PhonemeResult
 
 
@@ -36,7 +37,6 @@ class _FakePhonemeEngine:
                 substitution=None,
                 start_ms=0,
                 end_ms=120,
-                calibrated_score=None,
             )
         ]
         diagnostics = {
@@ -97,8 +97,8 @@ class ScoreRouteAsyncTests(unittest.TestCase):
         )
         request = SimpleNamespace(app=app)
 
-        original_native_f0 = score_mod.get_native_f0
-        score_mod.get_native_f0 = lambda phrase, accent, prosody: (
+        original_native_f0 = pipeline_mod.get_native_f0
+        pipeline_mod.get_native_f0 = lambda phrase, accent, prosody: (
             np.array([100.0, 110.0, 0.0, 120.0], dtype=np.float32),
             1000,
         )
@@ -113,7 +113,7 @@ class ScoreRouteAsyncTests(unittest.TestCase):
                 )
             )
         finally:
-            score_mod.get_native_f0 = original_native_f0
+            pipeline_mod.get_native_f0 = original_native_f0
 
         self.assertEqual(result["wer"], 0.0)
         self.assertEqual(result["debug"]["phrase_match"]["phrase_match"], 100.0)
@@ -129,15 +129,15 @@ class ScoreRouteAsyncTests(unittest.TestCase):
                 prosody_engine=_FakeProsodyEngine(),
             )
         )
-        original_native_f0 = score_mod.get_native_f0
-        score_mod.get_native_f0 = lambda phrase, accent, prosody: (
+        original_native_f0 = pipeline_mod.get_native_f0
+        pipeline_mod.get_native_f0 = lambda phrase, accent, prosody: (
             np.array([100.0], dtype=np.float32),
             100,
         )
         try:
             asyncio.run(score_mod._prewarm_context(app, "Ship or sheep?", "GA"))
         finally:
-            score_mod.get_native_f0 = original_native_f0
+            pipeline_mod.get_native_f0 = original_native_f0
         self.assertEqual(engine.prepared, ["Ship or sheep?"])
 
 

@@ -1,12 +1,15 @@
 """
-Whisper transcription layer — cross-checks what the user actually said
-against the expected phrase. Runs faster-whisper (CTranslate2 backend)
-with the large-v3 model on MPS/CPU.
+Whisper transcription layer — cross-checks what the user actually said.
+Runs faster-whisper (CTranslate2) with int8 quantisation on CPU.
 
-Used in the scoring pipeline to:
-  1. Detect if the user said the wrong words entirely
-  2. Provide word-level timestamps for display
-  3. Feed word error rate as a signal into the overall score
+Single transcribe entry point with two orthogonal flags:
+
+  * ``words``: include per-word timestamps (slightly slower)
+  * ``fast``:  greedy decode + no VAD (faster, used when we only need text)
+
+The full ``words=True, fast=False`` combination uses beam search + VAD, which
+is the slowest but most reliable; it is the default for one-shot transcription
+of recordings such as ``/api/accent-clone`` audio.
 """
 import logging
 import os
@@ -20,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_FALLBACK_MODEL = os.getenv("WHISPER_FALLBACK_MODEL", "large-v3")
-WHISPER_DEVICE = "cpu"   # faster-whisper uses CTranslate2; MPS not yet supported
-WHISPER_COMPUTE = "int8" # int8 quantisation — fast on M5 Pro CPU, ~1GB RAM
+WHISPER_DEVICE = "cpu"   # CTranslate2; MPS unsupported.
+WHISPER_COMPUTE = "int8"
 WHISPER_CPU_THREADS = int(os.getenv("WHISPER_CPU_THREADS", "0"))
 
 
@@ -53,98 +56,76 @@ class WhisperEngine:
             self.model_size = WHISPER_FALLBACK_MODEL
         logger.info(f"Whisper ready ({self.model_size})")
 
-    def transcribe(self, wav_np: np.ndarray, sr: int = 16000) -> dict:
+    def transcribe(
+        self,
+        wav_np: np.ndarray,
+        *,
+        words: bool = False,
+        fast: bool = True,
+    ) -> dict:
+        """Transcribe ``wav_np`` (float32, 16 kHz mono).
+
+        ``fast=True`` (default) uses greedy decode + no VAD, which is the right
+        choice for output validation and reference checks. ``fast=False`` adds
+        beam search + VAD for higher-quality one-shot transcription.
         """
-        Transcribe audio → {text, words, wer_vs_expected (None until phrase given)}.
-        wav_np: float32 array at 16 kHz.
-        """
+        if fast:
+            decode_kwargs = {
+                "beam_size": 1,
+                "best_of": 1,
+                "temperature": 0.0,
+                "condition_on_previous_text": False,
+            }
+            vad_kwargs: dict = {"vad_filter": False}
+        else:
+            decode_kwargs = {}
+            vad_kwargs = {
+                "vad_filter": True,
+                "vad_parameters": {"min_silence_duration_ms": 300},
+            }
+
         with self._lock:
             segments, info = self.model.transcribe(
                 wav_np,
                 language="en",
                 task="transcribe",
-                word_timestamps=True,
-                vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 300},
+                word_timestamps=words,
+                **vad_kwargs,
+                **decode_kwargs,
             )
-            return self._collect(segments, info, with_words=True)
+            return self._collect(segments, info, with_words=words)
+
+    # ── Backwards-compat shims for older callers ──────────────────────
 
     def transcribe_fast(self, wav_np: np.ndarray) -> str:
-        """Lightweight transcription used for output validation.
-
-        Skips word timestamps + VAD, uses greedy decoding. ~2-3x faster than
-        the full `transcribe()` because we don't need word-level alignment —
-        we only need a text string to compare against an expected reference.
-        """
-        with self._lock:
-            segments, _ = self.model.transcribe(
-                wav_np,
-                language="en",
-                task="transcribe",
-                word_timestamps=False,
-                vad_filter=False,
-                beam_size=1,
-                best_of=1,
-                temperature=0.0,
-                condition_on_previous_text=False,
-            )
-            return "".join(seg.text for seg in segments).strip()
+        return self.transcribe(wav_np, words=False, fast=True)["text"]
 
     def transcribe_with_words(self, wav_np: np.ndarray) -> dict:
-        """Greedy decode WITH word timestamps. Used by /api/voice/speak so the
-        client can highlight the active word during playback.
-
-        Faster than the full `transcribe()` (no beam search, no VAD) but still
-        emits per-word start/end times. Same single STT pass also serves as
-        the instruct-mode validation transcript.
-        """
-        with self._lock:
-            segments, _ = self.model.transcribe(
-                wav_np,
-                language="en",
-                task="transcribe",
-                word_timestamps=True,
-                vad_filter=False,
-                beam_size=1,
-                best_of=1,
-                temperature=0.0,
-                condition_on_previous_text=False,
-            )
-            words = []
-            text = ""
-            for seg in segments:
-                text += seg.text
-                if seg.words:
-                    for w in seg.words:
-                        words.append({
-                            "word": w.word,
-                            "start_ms": round(w.start * 1000),
-                            "end_ms": round(w.end * 1000),
-                        })
-            return {"text": text.strip(), "words": words}
+        return self.transcribe(wav_np, words=True, fast=True)
 
     def warmup(self) -> None:
-        """Run a tiny greedy decode so CTranslate2 has initialized workers."""
-        self.transcribe_fast(np.zeros(16_000, dtype=np.float32))
+        """Tiny greedy decode so CTranslate2 has warm workers."""
+        self.transcribe(np.zeros(16_000, dtype=np.float32), words=False, fast=True)
 
     def _collect(self, segments, info, *, with_words: bool) -> dict:
-        words = []
+        words: list[dict] = []
         full_text = ""
         for seg in segments:
             full_text += seg.text
             if with_words and seg.words:
                 for w in seg.words:
                     words.append({
-                        "word": w.word.strip(),
+                        "word": w.word.strip() if not with_words else w.word,
                         "start_ms": round(w.start * 1000),
                         "end_ms": round(w.end * 1000),
-                        "probability": round(w.probability, 3),
+                        **({"probability": round(w.probability, 3)} if hasattr(w, "probability") else {}),
                     })
-
         return {
             "text": full_text.strip(),
             "words": words,
-            "language_probability": round(info.language_probability, 3),
+            "language_probability": round(info.language_probability, 3)
+            if info is not None and hasattr(info, "language_probability")
+            else None,
         }
 
     @staticmethod
