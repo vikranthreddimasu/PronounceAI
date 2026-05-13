@@ -6,9 +6,9 @@
 [![python](https://img.shields.io/badge/python-3.11-3776AB)](backend/requirements.prod.txt)
 [![nextjs](https://img.shields.io/badge/Next.js-16-000000)](frontend/package.json)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![samples](https://img.shields.io/badge/▶_sample_gallery-A78BFA?logoColor=fff)](https://vikranthreddimasu.github.io/PronounceAI/)
+[![samples](https://img.shields.io/badge/▶_listen_to_samples-A78BFA?logoColor=fff)](https://vikranthreddimasu.github.io/PronounceAI/)
 
-> 🎧 **Sample gallery → <https://vikranthreddimasu.github.io/PronounceAI/>** — every audio sample below is playable inline on that page. The thumbnails in this README link straight to the corresponding clip in the gallery, where a native HTML5 player opens and plays it without downloading.
+**Listen to every sample inline →** <https://vikranthreddimasu.github.io/PronounceAI/>
 
 ---
 
@@ -94,39 +94,21 @@ flowchart LR
 
 ### 1 · Voice cloning across emotions and accents
 
-CosyVoice 3 voice conversion. The learner records once; every clip below is generated from that single enrolment. Click any waveform to open the [sample gallery](https://vikranthreddimasu.github.io/PronounceAI/) and play the rendering inline.
+CosyVoice 3 voice conversion. The learner records once. The same speaker can be rendered across emotional styles (happy, sad, angry, calm, whisper) in both General American and Received Pronunciation.
 
-**Happy · General American** — *"I just got promoted today. I am so excited for the future!"*
-
-[![Play Happy / GA](docs/samples/voice_happy_ga_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#happy-ga)
-
-**Sad · Received Pronunciation** — *"The old photograph brought back so many precious memories."*
-
-[![Play Sad / RP](docs/samples/voice_sad_rp_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#sad-rp)
-
-**Angry · General American** — *"This is completely unacceptable. I demand to speak to the manager."*
-
-[![Play Angry / GA](docs/samples/voice_angry_ga_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#angry-ga)
-
-**Calm · Received Pronunciation** — *"Close your eyes. Breathe in slowly. Let the tension fade away."*
-
-[![Play Calm / RP](docs/samples/voice_calm_rp_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#calm-rp)
-
-**Whisper · General American** — *"I need to tell you a secret, but you must promise not to tell anyone."*
-
-[![Play Whisper / GA](docs/samples/voice_whisper_ga_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#whisper-ga)
+→ **[Listen to the variants in the sample gallery](https://vikranthreddimasu.github.io/PronounceAI/#happy-ga)**.
 
 ### 2 · Pronunciation scoring
 
 Three score JSON fixtures are committed so the response shape is inspectable without running the server:
 
-| Phrase · Accent | Overall | Phrase match | JSON | Native reference |
-| --- | :-: | :-: | --- | --- |
-| "Ship or sheep?" · GA | **84.5** | `ok` | [json](docs/samples/score_ga_ship_or_sheep.json) | [![play](docs/samples/tts_ga_ship_or_sheep_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#tts-ship) |
-| "She sells seashells by the seashore." · GA | **92.4** | `ok` | [json](docs/samples/score_ga_seashells.json) | [![play](docs/samples/tts_ga_seashells_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#tts-seashells) |
-| "The quick brown fox jumps over the lazy dog." · GA | **92.3** | `ok` | [json](docs/samples/score_rp_quick_brown_fox_rp.json) | [![play](docs/samples/tts_ga_quick_brown_fox_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#tts-fox) |
+| Phrase · Accent | Overall | Phrase match | JSON |
+| --- | :-: | :-: | --- |
+| "Ship or sheep?" · GA | **84.5** | `ok` | [score_ga_ship_or_sheep.json](docs/samples/score_ga_ship_or_sheep.json) |
+| "She sells seashells by the seashore." · GA | **92.4** | `ok` | [score_ga_seashells.json](docs/samples/score_ga_seashells.json) |
+| "The quick brown fox jumps over the lazy dog." · GA | **92.3** | `ok` | [score_rp_quick_brown_fox_rp.json](docs/samples/score_rp_quick_brown_fox_rp.json) |
 
-Each fixture carries per-phoneme GOP with timestamps, the four scoring dimensions, the discrete `phrase_match_status`, the pitch overlay, and a `debug` block exposing weights and raw scores.
+Each fixture carries per-phoneme GOP with timestamps, the four scoring dimensions, the discrete `phrase_match_status`, the pitch overlay, and a `debug` block exposing weights and raw scores. The native-accent references that drive the pitch overlay are in the [gallery](https://vikranthreddimasu.github.io/PronounceAI/#tts-ship) too.
 
 ### 3 · The product UI
 
@@ -162,7 +144,7 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 npm run dev
 
 CosyVoice voice cloning needs `mlx-audio-plus` (Apple Silicon only). On other platforms the system falls back to Kokoro TTS in the requested accent.
 
-**Regenerate the README samples**
+**Regenerate the samples**
 
 ```bash
 cd backend && source .venv/bin/activate
@@ -232,8 +214,8 @@ backend/app/
 
 backend/training/       speechocean762 + WavLM head training utilities
 backend/tests/          pytest, no network (34 tests, all green)
-docs/                   index.html (sample gallery, served via GitHub Pages)
-docs/samples/           audio + JSON fixtures the README links to
+docs/                   index.html (sample gallery served via GitHub Pages)
+docs/samples/           audio + JSON fixtures
 frontend/src/           App Router pages + practice/voice UI + API client
 ```
 
