@@ -13,15 +13,17 @@
 
 A learner's enrolled voice, then the same speaker rendered in a long American-English sentence they never recorded — produced by the pipeline in this repository.
 
-| Their natural voice (enrolment recording) |
-| --- |
-| <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/voice_user_original.mp4" controls width="100%"></video> |
-| <sub>“Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river…”</sub> |
+**Their natural voice (enrolment recording)**
 
-| Their voice — rendered by PronounceAI in General American |
-| --- |
-| <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/voice_user_clone_ga.mp4" controls width="100%"></video> |
-| <sub>“The renewable energy transition will define the next half-century, and the engineers who solve the storage problem will reshape every industry from agriculture to artificial intelligence.”</sub> |
+https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_user_original.mp4
+
+> *"Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river…"*
+
+**Their voice — rendered by PronounceAI in General American**
+
+https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_user_clone_ga.mp4
+
+> *"The renewable energy transition will define the next half-century, and the engineers who solve the storage problem will reshape every industry from agriculture to artificial intelligence."*
 
 Identity preserved. New sentence. Target accent locked in.
 
@@ -42,17 +44,17 @@ One audio recording fans out across four independent, explainable signals. Nothi
 
 ```mermaid
 flowchart LR
-  A[Browser MediaRecorder] -->|webm/opus| B[/api/score]
-  B --> C{preprocess<br/>VAD · resample 16k · norm}
-  C --> D[Phoneme alignment<br/>wav2vec2 + forced_align]
-  C --> E[Prosody<br/>Parselmouth F0 · nPVI]
-  C --> F[Phrase grounding<br/>faster-whisper int8]
-  C --> G[Holistic head<br/>WavLM multi-aspect]
-  D --> H((fusion<br/>0.55 / 0.20 / 0.15 / 0.10))
+  A["Browser MediaRecorder"] -->|"webm / opus"| B["POST /api/score"]
+  B --> C["preprocess: VAD + resample 16k + normalise"]
+  C --> D["Phoneme alignment<br/>wav2vec2 + forced_align"]
+  C --> E["Prosody<br/>Parselmouth F0 + nPVI"]
+  C --> F["Phrase grounding<br/>faster-whisper int8"]
+  C --> G["Holistic head<br/>WavLM multi-aspect"]
+  D --> H[["fusion<br/>0.55 / 0.20 / 0.15 / 0.10"]]
   E --> H
   F --> H
   G --> H
-  H --> I[Score + per-phoneme tape<br/>+ pitch overlay + actionable tip]
+  H --> I["Score + per-phoneme tape<br/>+ pitch overlay + actionable tip"]
 ```
 
 | Signal | Answers |
@@ -75,12 +77,12 @@ For voice cloning we picked **one** pipeline (no fallback chain): CosyVoice 3 vo
 
 ```mermaid
 flowchart LR
-  T[Target text] --> K[Kokoro TTS<br/>in target accent]
-  R[Learner enrolment<br/>~10 s] --> CV[CosyVoice 3 VC]
-  K -->|accent source| CV
-  CV --> O[Output WAV<br/>learner's voice +<br/>target accent + emotion]
-  O --> V[Whisper STT<br/>word timings + validation]
-  V --> RES[Response<br/>+ X-Word-Timings header]
+  T["Target text"] --> K["Kokoro TTS<br/>in target accent"]
+  R["Learner enrolment ~10s"] --> CV["CosyVoice 3 VC"]
+  K -->|"accent source"| CV
+  CV --> O["Output WAV<br/>learner voice + target accent + emotion"]
+  O --> V["Whisper STT<br/>word timings + validation"]
+  V --> RES["Response + X-Word-Timings header"]
 ```
 
 ---
@@ -91,29 +93,46 @@ flowchart LR
 
 CosyVoice 3 voice conversion. The learner records once; every clip below is generated from that single enrolment.
 
-| Emotion · Accent | Sample |
-| --- | --- |
-| **Happy · General American** — *“I just got promoted today. I am so excited for the future!”* | <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/voice_happy_ga.mp4" controls width="100%"></video> |
-| **Sad · Received Pronunciation** — *“The old photograph brought back so many precious memories.”* | <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/voice_sad_rp.mp4" controls width="100%"></video> |
-| **Angry · General American** — *“This is completely unacceptable. I demand to speak to the manager.”* | <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/voice_angry_ga.mp4" controls width="100%"></video> |
-| **Calm · Received Pronunciation** — *“Close your eyes. Breathe in slowly. Let the tension fade away.”* | <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/voice_calm_rp.mp4" controls width="100%"></video> |
-| **Whisper · General American** — *“I need to tell you a secret, but you must promise not to tell anyone.”* | <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/voice_whisper_ga.mp4" controls width="100%"></video> |
+**Happy · General American**
+> *"I just got promoted today. I am so excited for the future!"*
+
+https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_happy_ga.mp4
+
+**Sad · Received Pronunciation**
+> *"The old photograph brought back so many precious memories."*
+
+https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_sad_rp.mp4
+
+**Angry · General American**
+> *"This is completely unacceptable. I demand to speak to the manager."*
+
+https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_angry_ga.mp4
+
+**Calm · Received Pronunciation**
+> *"Close your eyes. Breathe in slowly. Let the tension fade away."*
+
+https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_calm_rp.mp4
+
+**Whisper · General American**
+> *"I need to tell you a secret, but you must promise not to tell anyone."*
+
+https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/voice_whisper_ga.mp4
 
 ### 2 · Pronunciation scoring
 
-| Phrase · Accent | Overall | Phrase match | Native reference |
-| --- | :-: | :-: | --- |
-| "Ship or sheep?" · GA | **84.5** | `ok` | <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/tts_ga_ship_or_sheep.mp4" controls width="100%"></video> |
-| "She sells seashells by the seashore." · GA | **92.4** | `ok` | <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/tts_ga_seashells.mp4" controls width="100%"></video> |
-| "The quick brown fox jumps over the lazy dog." · RP | **92.3** | `ok` | <video src="https://github.com/vikranthreddimasu/PronounceAI/raw/main/docs/samples/tts_ga_quick_brown_fox.mp4" controls width="100%"></video> |
+Three score JSON fixtures are committed so the response shape is inspectable without running the server:
 
-Each score has the full `/api/score` JSON committed as a fixture for inspection:
+| Phrase · Accent | Overall | Phrase match | JSON | Native reference |
+| --- | :-: | :-: | --- | --- |
+| "Ship or sheep?" · GA | **84.5** | `ok` | [json](docs/samples/score_ga_ship_or_sheep.json) | [mp4](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/tts_ga_ship_or_sheep.mp4) |
+| "She sells seashells by the seashore." · GA | **92.4** | `ok` | [json](docs/samples/score_ga_seashells.json) | [mp4](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/tts_ga_seashells.mp4) |
+| "The quick brown fox jumps over the lazy dog." · RP | **92.3** | `ok` | [json](docs/samples/score_rp_quick_brown_fox_rp.json) | [mp4](https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/tts_ga_quick_brown_fox.mp4) |
 
-- [`docs/samples/score_ga_ship_or_sheep.json`](docs/samples/score_ga_ship_or_sheep.json)
-- [`docs/samples/score_ga_seashells.json`](docs/samples/score_ga_seashells.json)
-- [`docs/samples/score_rp_quick_brown_fox_rp.json`](docs/samples/score_rp_quick_brown_fox_rp.json)
+Each fixture carries per-phoneme GOP with timestamps, the four scoring dimensions, the discrete `phrase_match_status`, the pitch overlay, and a `debug` block exposing weights and raw scores.
 
-Each file carries per-phoneme GOP with timestamps, the four scoring dimensions, the discrete `phrase_match_status`, the pitch overlay, and a `debug` block exposing weights and raw scores. Drop the JSON into the frontend and the page renders as-is.
+**Quick listen — "She sells seashells by the seashore." in General American**
+
+https://github.com/vikranthreddimasu/PronounceAI/releases/download/samples-v1/tts_ga_seashells.mp4
 
 ### 3 · The product UI
 
@@ -162,37 +181,42 @@ python scripts/generate_readme_samples.py     # idempotent; needs ffmpeg on PATH
 
 ```mermaid
 flowchart TB
-  subgraph Browser["Browser · Next.js 16 / React 19"]
-    UI[Practice · Voice Lab · Progress · Settings]
-    REC[MediaRecorder]
+  subgraph Browser["Browser - Next.js 16 / React 19"]
+    UI["Practice · Voice Lab · Progress · Settings"]
+    REC["MediaRecorder"]
   end
 
   subgraph FastAPI["FastAPI backend"]
-    R1[/api/score/]
-    R2[/api/voice/speak/]
-    R3[/api/accent-clone/]
-    R4[/api/voice/enroll/]
-    R5[/api/tts/]
-    SC[app/scoring/<br/>async pipeline + fusion + feedback]
-    VS[app/services/voice_synth.py<br/>shared synth service]
+    R1["POST /api/score"]
+    R2["POST /api/voice/speak"]
+    R3["POST /api/accent-clone"]
+    R4["POST /api/voice/enroll"]
+    R5["GET /api/tts"]
+    SC["app/scoring/<br/>async pipeline + fusion + feedback"]
+    VS["app/services/voice_synth.py<br/>shared synth service"]
     R1 --> SC
     R2 --> VS
     R3 --> VS
   end
 
   subgraph Models["Speech / ML runtime"]
-    M1[wav2vec2 phoneme CTC]
-    M2[faster-whisper int8]
-    M3[Parselmouth · librosa]
-    M4[Kokoro 82M TTS]
-    M5[CosyVoice 3 voice conversion]
-    M6[WavLM Large + assessment head]
+    M1["wav2vec2 phoneme CTC"]
+    M2["faster-whisper int8"]
+    M3["Parselmouth · librosa"]
+    M4["Kokoro 82M TTS"]
+    M5["CosyVoice 3 voice conversion"]
+    M6["WavLM Large + assessment head"]
   end
 
-  Browser -- multipart audio --> FastAPI
-  SC --> M1 & M2 & M3 & M6
-  VS --> M4 & M5 & M2
-  R4 --> FS[(filesystem voice store)]
+  Browser -->|"multipart audio"| FastAPI
+  SC --> M1
+  SC --> M2
+  SC --> M3
+  SC --> M6
+  VS --> M4
+  VS --> M5
+  VS --> M2
+  R4 --> FS[("filesystem voice store")]
   R5 --> M4
 ```
 
@@ -214,7 +238,7 @@ backend/app/
 
 backend/training/       speechocean762 + WavLM head training utilities
 backend/tests/          pytest, no network (34 tests, all green)
-docs/samples/           14 audio + JSON fixtures the README links to
+docs/samples/           audio + JSON fixtures the README links to
 frontend/src/           App Router pages + practice/voice UI + API client
 ```
 
