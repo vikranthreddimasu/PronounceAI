@@ -34,19 +34,5 @@
     "voice_user_clone_ga.mp4",
     "voice_user_original.mp4",
     "voice_whisper_ga.mp4"
-  ],
-  "thumbnails": [
-    "tts_ga_quick_brown_fox_thumb.png",
-    "tts_ga_seashells_thumb.png",
-    "tts_ga_ship_or_sheep_thumb.png",
-    "tts_rp_fastest_route_thumb.png",
-    "tts_rp_ship_or_sheep_thumb.png",
-    "voice_angry_ga_thumb.png",
-    "voice_calm_rp_thumb.png",
-    "voice_happy_ga_thumb.png",
-    "voice_sad_rp_thumb.png",
-    "voice_user_clone_ga_thumb.png",
-    "voice_user_original_thumb.png",
-    "voice_whisper_ga_thumb.png"
   ]
 }

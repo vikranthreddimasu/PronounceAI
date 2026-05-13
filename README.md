@@ -14,21 +14,9 @@
 
 ## Hear it before you read about it
 
-A learner's enrolled voice, then the same speaker rendered in a long American-English sentence they never recorded — produced by the pipeline in this repository.
+A learner records ten seconds. The pipeline then renders the same speaker, in General American, saying a long sentence they never spoke. Identity preserved. New sentence. Target accent locked in.
 
-**Their natural voice (enrolment recording)**
-
-[![Play the enrolment recording](docs/samples/voice_user_original_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#user-original)
-
-> *"Hello, my name is Alex. The quick brown fox jumps over the lazy dog by the river…"*
-
-**Their voice — rendered by PronounceAI in General American**
-
-[![Play the General American clone](docs/samples/voice_user_clone_ga_thumb.png)](https://vikranthreddimasu.github.io/PronounceAI/#user-clone-ga)
-
-> *"The renewable energy transition will define the next half-century, and the engineers who solve the storage problem will reshape every industry from agriculture to artificial intelligence."*
-
-Identity preserved. New sentence. Target accent locked in.
+→ **[Listen to the side-by-side comparison](https://vikranthreddimasu.github.io/PronounceAI/#user-clone-ga)** in the sample gallery.
 
 ---
 
