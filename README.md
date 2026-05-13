@@ -1,329 +1,409 @@
 # PronounceAI
 
-PronounceAI is an AI pronunciation and voice-coaching system for English accent practice. It combines a Next.js frontend with a FastAPI speech backend to score spoken phrases at phoneme level, compare pitch movement against a native reference, track local progress, and generate accent-targeted reference audio.
+> Specific, fast, and respectful of your voice. Pronunciation coaching that hears every phoneme, sees every pitch curve, and never tells you "good job, try again."
 
-The project is designed as a reproducible local AI product: the frontend can run in demo mode without a backend, while the live backend loads speech models for scoring, TTS, enrollment, and optional voice/accent workflows.
+![status](https://img.shields.io/badge/status-final%20project-7C3AED)
+![tests](https://img.shields.io/badge/tests-34%2F34%20passing-22C55E)
+![python](https://img.shields.io/badge/python-3.11-3776AB)
+![nextjs](https://img.shields.io/badge/Next.js-16-000)
+![license](https://img.shields.io/badge/license-MIT-blue)
 
-## Core Capabilities
+---
 
-- **Phoneme-level pronunciation scoring** using a wav2vec2 CTC phoneme model and forced alignment.
-- **Prosody analysis** for intonation, rhythm, speech rate, and optional vowel formants.
-- **Native reference audio** through Kokoro TTS for target-accent playback.
-- **Pitch contour overlays** comparing learner F0 against a synthesized native reference.
-- **Transcript grounding** with optional faster-whisper phrase matching and WER gates.
-- **Voice Lab** for multi-take voice enrollment and target-accent speech generation.
-- **Local progress tracking** for sessions, streaks, and per-phoneme mastery.
-- **Dockerized local run path** for reproducible review by TAs, professors, and contributors.
+## Why this exists
 
-## Architecture
+Most pronunciation apps grade speech with a single number. The number is opaque, and the feedback collapses into "try again." Learners can hear they sounded *wrong* but never learn *what was wrong* or *how to fix it*.
 
-```text
-Browser / Next.js
-  - Practice UI, Voice Lab, Progress, Settings
-  - MediaRecorder audio capture
-  - localStorage profile, sessions, streaks, voice handle
-  - API client caches and demo-mode fallback
+PronounceAI exists because two beliefs are non-negotiable in our work:
 
-FastAPI Backend
-  - /api/score pronunciation assessment
-  - /api/tts native reference TTS
-  - /api/voice/* voice enrollment and speech
-  - /api/accent-convert and /api/accent-clone optional accent tools
+1. **Feedback must point at the sound, not at the speaker.** When the `/r/` drifts toward `/l/`, we want the system to say so — at the millisecond it happened.
+2. **Your voice is yours.** Accent coaching shouldn't replace your timbre with a generic native speaker's. We should be able to render the *same words* in the target accent while keeping the voice recognizably you.
 
-Speech / ML Runtime
-  - wav2vec2 phoneme CTC + forced alignment
-  - g2p-en text-to-phoneme conversion
-  - Parselmouth/librosa prosody analysis
-  - Kokoro TTS native references
-  - optional faster-whisper, WavLM, learned assessment heads, kNN-VC, CosyVoice
+Everything else — the architecture, the model choices, the cache layers — exists to serve those two beliefs.
+
+---
+
+## How we deliver it
+
+We chain four independent, explainable signals through one async pipeline. Each signal answers a different question, and no signal can silently override another. Together they form a per-phoneme + per-utterance picture of what the learner said and how it differs from a native reference.
+
+| Signal | Model | What it answers |
+| --- | --- | --- |
+| **Phoneme alignment** | wav2vec2-large-robust-L2 + CTC forced alignment | "Where in time did each phone happen, and how confident was the model that you produced it?" (Goodness-of-Pronunciation log-prob per phone.) |
+| **Prosody** | Parselmouth + librosa | "Did your pitch contour move like a native speaker's? Was your stress timing English-like (nPVI), or syllable-timed?" |
+| **Phrase grounding** | faster-whisper (CTranslate2, int8) | "Did you actually say the words you were asked to say?" — surfaced as a discrete `phrase_match_status`, not a silent score cap. |
+| **Holistic assessment** | WavLM multi-aspect head (optional) | A learned second opinion calibrated against human ratings (speechocean762 utterance scores). Blended at a bounded weight when its checkpoint is present. |
+
+The score the user sees is a transparent weighted sum:
+
+```
+overall = 0.55 · phoneme_accuracy
+       + 0.20 · intonation
+       + 0.15 · stress_rhythm
+       + 0.10 · vowel_quality      ← diagnostic, lightly weighted
 ```
 
-## Tech Stack
+For the voice clone side, we deliberately picked **one pipeline** rather than blending several: CosyVoice 3 Voice Conversion, with the target-accent source rendered by Kokoro TTS. That keeps the accent deterministic while the speaker identity stays the learner's.
 
-| Layer | Implementation |
+---
+
+## What you actually get
+
+### A. Pronunciation scoring — `POST /api/score`
+
+Upload audio + the expected phrase. Get back per-phoneme GOP scores with start/end timestamps, four scoring dimensions, a phrase-match status, the pitch overlay, and an actionable tip drawn from a phonological-feature substitution table.
+
+**Live samples** (Kokoro-synth audio scored against the same phrase — close to a "perfect" baseline):
+
+| Phrase | Accent | Overall | Phrase match | Sample |
+| --- | --- | :-: | :-: | --- |
+| "Ship or sheep?" | GA | **84.5** | `ok` | [`score_ga_ship_or_sheep.json`](docs/samples/score_ga_ship_or_sheep.json) |
+| "She sells seashells by the seashore." | GA | **92.4** | `ok` | [`score_ga_seashells.json`](docs/samples/score_ga_seashells.json) |
+| "The quick brown fox jumps over the lazy dog." | RP | **92.3** | `ok` | [`score_rp_quick_brown_fox_rp.json`](docs/samples/score_rp_quick_brown_fox_rp.json) |
+
+Each JSON file is the exact shape the frontend receives, including `phonemes[]` with timestamps, `scores`, `pitch_contour`, the `debug` block with raw scores + weights, and the new `phrase_match_status` discrete state.
+
+### B. Voice clone in a selected accent — `POST /api/voice/speak` and `POST /api/accent-clone`
+
+Record one short enrollment (~10s). Then any text you type is rendered in **your timbre** + the **target accent** — General American or Received Pronunciation — with optional emotional styling. The same endpoint accepts text directly (`/voice/speak`) or audio that gets Whisper-transcribed first (`/accent-clone`).
+
+**Live samples** (synthetic enrollment built from Kokoro, then CosyVoice 3 voice conversion):
+
+<table>
+  <tr><th>Emotion</th><th>Accent</th><th>Line</th><th>Sample</th></tr>
+  <tr>
+    <td>Happy</td><td>GA</td>
+    <td><em>"I just got promoted today. I am so excited for the future!"</em></td>
+    <td><a href="docs/samples/voice_happy_ga.wav"><code>voice_happy_ga.wav</code></a></td>
+  </tr>
+  <tr>
+    <td>Sad</td><td>RP</td>
+    <td><em>"The old photograph brought back so many precious memories."</em></td>
+    <td><a href="docs/samples/voice_sad_rp.wav"><code>voice_sad_rp.wav</code></a></td>
+  </tr>
+  <tr>
+    <td>Angry</td><td>GA</td>
+    <td><em>"This is completely unacceptable. I demand to speak to the manager."</em></td>
+    <td><a href="docs/samples/voice_angry_ga.wav"><code>voice_angry_ga.wav</code></a></td>
+  </tr>
+  <tr>
+    <td>Calm</td><td>RP</td>
+    <td><em>"Close your eyes. Breathe in slowly. Let the tension fade away."</em></td>
+    <td><a href="docs/samples/voice_calm_rp.wav"><code>voice_calm_rp.wav</code></a></td>
+  </tr>
+  <tr>
+    <td>Whisper</td><td>GA</td>
+    <td><em>"I need to tell you a secret, but you must promise not to tell anyone."</em></td>
+    <td><a href="docs/samples/voice_whisper_ga.wav"><code>voice_whisper_ga.wav</code></a></td>
+  </tr>
+</table>
+
+> GitHub renders `<audio controls>` tags inline when the README is browsed on github.com. The samples above are also playable directly in VS Code's markdown preview.
+
+### C. Native target-accent TTS — `GET /api/tts`
+
+Kokoro 82M produces clean reference audio for the practice flow. Same phrase, two accents, no learner enrollment required.
+
+| Phrase | GA reference | RP reference |
+| --- | --- | --- |
+| "Ship or sheep?" | [`tts_ga_ship_or_sheep.wav`](docs/samples/tts_ga_ship_or_sheep.wav) | [`tts_rp_ship_or_sheep.wav`](docs/samples/tts_rp_ship_or_sheep.wav) |
+| "She sells seashells by the seashore." | [`tts_ga_seashells.wav`](docs/samples/tts_ga_seashells.wav) | — |
+| "The quick brown fox jumps over the lazy dog." | [`tts_ga_quick_brown_fox.wav`](docs/samples/tts_ga_quick_brown_fox.wav) | — |
+| "Could you show me the fastest route to the station?" | — | [`tts_rp_fastest_route.wav`](docs/samples/tts_rp_fastest_route.wav) |
+
+### D. Practice UI, Voice Lab, Progress, Settings
+
+| Route | Purpose |
 | --- | --- |
-| Frontend | Next.js 16, React 19, TypeScript, CSS/Tailwind v4 tooling |
-| Audio capture | Browser `MediaRecorder`, WebAudio level metering |
-| Backend API | FastAPI, Uvicorn, Pydantic, python-multipart |
-| Core speech model | `slplab/wav2vec2-large-robust-L2-english-phoneme-recognition` |
-| Text to phonemes | `g2p-en`, CMUdict/NLTK, optional phonemizer/espeak-ng |
-| ASR | optional `faster-whisper` |
-| TTS | Kokoro 82M |
-| Prosody | Parselmouth/Praat, librosa, scipy/numpy |
-| Embeddings | optional WavLM Large |
-| Voice/accent tools | optional kNN-VC and CosyVoice path |
-| Storage | Browser localStorage plus backend filesystem voice enrollment store |
-| Containers | Dockerfile for backend, Dockerfile for frontend, root `docker-compose.yml` |
+| `/practice` | Phrase library + custom-text recording → live score + pitch overlay + per-phoneme tape + actionable tip. |
+| `/studio` | Voice Lab — enroll, manage takes, type any text, render it in your voice + chosen accent + emotion. |
+| `/progress` | Local session history, streak, per-phoneme mastery (browser-only, no account). |
+| `/settings` | Target accent, theme, sound effects, profile reset. |
 
-## Repository Structure
+---
 
-```text
-PronounceAI/
-|-- README.md
-|-- report.md
-|-- API.md
-|-- docker-compose.yml
-|-- docs/
-|   |-- DEPLOYMENT.md          # Stable local container runbook
-|   `-- REDESIGN_PLAN.md       # Historical design/research notes
-|-- backend/
-|   |-- Dockerfile
-|   |-- requirements.txt
-|   |-- requirements.prod.txt
-|   |-- setup.sh
-|   |-- app/
-|   |   |-- main.py            # FastAPI app, CORS, lifespan model loading
-|   |   |-- api/               # HTTP routes
-|   |   |-- models/            # Speech, scoring, TTS/voice model wrappers
-|   |   `-- utils/             # Audio, text metrics, voice store, native F0 cache
-|   |-- training/              # Speechocean/WavLM training utilities
-|   |-- evaluation/            # Local score API evaluator
-|   |-- scripts/               # VCTK/kNN-VC pool builder
-|   `-- tests/                 # Backend unit tests
-`-- frontend/
-    |-- Dockerfile
-    |-- package.json
-    |-- next.config.ts
-    `-- src/
-        |-- app/               # App Router pages
-        |-- components/        # Practice, scoring, voice, visualization UI
-        `-- lib/               # API client, recorder, store, voice profile logic
+## Architecture at a glance
+
+```
+Browser / Next.js 16
+  └── MediaRecorder  ─►  POST /api/score
+                         POST /api/voice/enroll
+                         POST /api/voice/speak           ◄── text in user's voice + accent
+                         POST /api/accent-clone          ◄── audio → ASR → same path
+                         GET  /api/tts                   ◄── Kokoro reference
+
+FastAPI backend
+  ├── app/scoring/        async pipeline: phoneme + prosody + whisper + (wavlm)
+  │     ├── pipeline.py      orchestrator (asyncio.to_thread fan-out)
+  │     ├── fusion.py        score blend + single discrete phrase-match gate
+  │     ├── pitch_contour.py F0 onset-aligned z-score for the overlay
+  │     ├── vowel_quality.py formant comparison vs accent norms
+  │     └── feedback.py      phonology hint generation
+  ├── app/services/
+  │     └── voice_synth.py   shared by /voice/speak + /accent-clone
+  ├── app/models/         engines: phoneme, prosody, whisper, voice_clone, ...
+  ├── app/utils/
+  │     ├── kokoro_speaker.py  single Kokoro pipeline (used 4 places)
+  │     ├── audio.py           VAD + resample + quality gate
+  │     ├── voice_store.py     multi-take enrollment + lazy bundle
+  │     └── native_pitch.py    cached F0 reference (mem + disk)
+  └── app/cache/
+        ├── memory.py    shared LRU
+        └── disk.py      atomic write + TTL
 ```
 
-## Quick Start With Docker
+Key design decisions, with the reason in one line:
 
-Docker is the most reproducible path for review.
+| Decision | Why |
+| --- | --- |
+| One Kokoro pipeline singleton instead of four duplicates | Eliminates redundant model load + locks; single VOICE_MAP. |
+| Three score caches share one `LRUCache` class | One LRU implementation, one eviction policy, fewer surprises. |
+| Disk cache uses tmp + rename | Atomic on POSIX — concurrent readers never see a half-written WAV. |
+| Score cache key includes checkpoint fingerprint | Swapping `assessment_head_best.pt` invalidates stale cached responses automatically. |
+| `phrase_match_status` is a discrete field, not a silent cap | UI can choose to show a chip; the score doesn't move mysteriously. |
+| VoiceClone picks one mode upfront | Predictable latency, no retry chain; STT runs once. |
+
+---
+
+## Quick start
+
+### Option 1 — Docker (recommended for review)
 
 ```bash
 docker compose up --build
 ```
 
-Open:
-
-```text
-http://localhost:3000
-```
-
-Backend health check:
+Then open `http://localhost:3000`. First run downloads ~2 GB of public speech models; subsequent runs are instant.
 
 ```bash
 curl http://localhost:8000/health
+# {"status":"ok"}
 ```
 
-Notes:
+The Docker compose profile runs a CPU-safe subset by default (Kokoro + phoneme scoring + prosody). To enable Whisper grounding and CosyVoice voice cloning, see the env table below.
 
-- The first backend run may take several minutes while public speech models download.
-- Compose uses named volumes for model caches, native F0 cache, and local voice enrollments.
-- The default container mode keeps Whisper, WavLM, and CosyVoice voice cloning disabled for CPU-safe reproducibility.
-- See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the stable local container runbook.
-
-## Local Development
-
-### Frontend
+### Option 2 — Local dev (Apple Silicon recommended)
 
 ```bash
+# Backend
+cd backend
+./setup.sh                            # creates .venv, installs PyTorch MPS, downloads NLTK data
+source .venv/bin/activate
+uvicorn app.main:app --reload --port 8000
+
+# Frontend (new terminal)
 cd frontend
 npm install
-npm run dev
-```
-
-Visit `http://localhost:3000`.
-
-If `NEXT_PUBLIC_API_URL` is empty, the app runs in demo mode with mock scoring and browser speech synthesis:
-
-```bash
-cp .env.example .env.local
-```
-
-To connect to a live backend:
-
-```bash
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 npm run dev
 ```
 
-### Backend
+Local default config enables Whisper + WavLM + CosyVoice 3 when `mlx-audio-plus` is installed (Apple Silicon only).
 
-Python 3.11 is recommended.
+### Regenerate the README samples
 
 ```bash
 cd backend
-python3.11 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
-pip install torch==2.5.1 torchaudio==2.5.1
-pip install -r requirements.txt
-cp .env.example .env.local
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python scripts/generate_readme_samples.py
 ```
 
-On Apple Silicon, `backend/setup.sh` automates the local MPS-oriented setup.
+Outputs land under `docs/samples/`. The script is idempotent and writes a `manifest.json`.
 
-## Environment Variables
+---
 
-### Frontend
+## Tech stack
 
-| Variable | Purpose |
+| Layer | Implementation |
 | --- | --- |
-| `NEXT_PUBLIC_API_URL` | Backend origin, for example `http://127.0.0.1:8000`. Empty means demo mode. |
-| `NEXT_PUBLIC_USE_MOCK` | Set to `1` to force mock mode even when an API URL is present. |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind v4 tooling |
+| Audio capture | Browser `MediaRecorder`, WebAudio level metering |
+| Backend API | FastAPI, Uvicorn, Pydantic, python-multipart |
+| Phoneme model | `slplab/wav2vec2-large-robust-L2-english-phoneme-recognition` |
+| Text→phonemes | `g2p-en` (CMUdict/NLTK) with `phonemizer-fork` + `espeak-ng` fallback |
+| ASR | `faster-whisper` (CTranslate2 int8) |
+| TTS | Kokoro 82M |
+| Voice clone | CosyVoice 3 via `mlx-audio-plus` (Apple Silicon) |
+| Prosody | Parselmouth/Praat, librosa, scipy/numpy |
+| Embeddings | WavLM Large (optional, for the multi-aspect head + accent distance) |
+| Storage | Browser `localStorage` + backend filesystem voice store |
+| Container | `docker-compose.yml` at repo root |
 
-### Backend
+---
 
-| Variable | Default / Example | Purpose |
-| --- | --- | --- |
-| `DEVICE` | `mps`, `cuda`, or `cpu` | Torch device for core models. |
-| `CORS_ORIGINS` | `http://localhost:3000` | Browser origins allowed to call the API. |
-| `WAV2VEC2_MODEL` | `slplab/wav2vec2-large-robust-L2-english-phoneme-recognition` | Phoneme CTC model. |
-| `WHISPER_MODEL` | `large-v3-turbo` locally, `small.en` in Docker defaults | faster-whisper model. |
-| `LOAD_WHISPER` | `1` locally, `0` in Docker defaults | Enables transcript/WER grounding. |
-| `LOAD_VOICE_CLONE` | `1` locally, `0` in Docker defaults | Enables CosyVoice voice cloning when dependencies are available. |
-| `SCORE_ASR_MODE` | `off`, `fast`, or `words` | Controls transcript path in `/api/score`. |
-| `SCORE_INCLUDE_FORMANTS` | `0` or `1` | Enables slower vowel formant extraction. |
-| `SCORE_WAVLM_MODE` | `auto` or `off` | Controls optional WavLM embedding/accent work. |
-| `PHONEME_SCORER_CHECKPOINT` | `checkpoints/phoneme_scorer_best.pt` | Optional GOP calibration head. |
-| `ASSESSMENT_SCORER_CHECKPOINT` | `checkpoints/assessment_head_best.pt` | Optional multi-aspect assessment head. |
-| `ACCENT_CENTROIDS_PATH` | `checkpoints/accent_centroids.pt` | Optional WavLM accent centroids. |
-| `ENROLLMENT_DIR` | `data/enrollments` | Filesystem store for voice profiles. |
-| `NATIVE_F0_CACHE_DIR` | `cache/native_f0` | Disk cache for native pitch references. |
-
-## Usage Guide
-
-### Voice Lab
-
-`/studio` is the default entry route. Users can enroll a short voice sample, choose General American or Received Pronunciation, write arbitrary English text, and render speech. When CosyVoice is unavailable, the backend can fall back to Kokoro target-accent audio.
-
-### Practice
-
-`/practice` provides phrase-based and custom-line recording. The flow is:
-
-1. Select or type a phrase.
-2. Optionally hear the target accent reference.
-3. Record a take in the browser.
-4. Submit to `POST /api/score`.
-5. Review overall score, score dimensions, phoneme timeline, pitch overlay, transcript evidence, and coaching notes.
-
-### Progress
-
-`/progress` reads local session history and phoneme statistics from `localStorage`. There is no server-side account or cloud-synced progress layer.
-
-### Settings
-
-`/settings` controls target accent, native-language hint, theme, sound effects, voice profile management, and local reset.
-
-## API Summary
+## API reference
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | Backend health check. |
-| `POST` | `/api/score` | Multipart recording assessment. |
-| `POST` | `/api/prewarm` | Best-effort phrase/model cache warmup. |
+| `GET` | `/health` | Liveness. |
+| `POST` | `/api/score` | Multipart pronunciation assessment. |
+| `POST` | `/api/prewarm` | Best-effort phrase + model cache warmup. |
 | `GET` | `/api/tts` | Kokoro native reference WAV. |
-| `POST` | `/api/accent-convert` | Optional kNN-VC accent conversion. |
-| `POST` | `/api/accent-clone` | Optional personal accent clone flow. |
-| `POST` | `/api/voice/enroll` | Add a voice enrollment take. |
+| `POST` | `/api/voice/enroll` | Append a voice-enrollment take. |
 | `GET` | `/api/voice/{user_id}` | Fetch enrollment summary. |
 | `DELETE` | `/api/voice/{user_id}` | Delete enrollment. |
 | `DELETE` | `/api/voice/{user_id}/takes/{take_id}` | Delete one take. |
-| `POST` | `/api/voice/speak` | Render text through the voice workflow. |
+| `POST` | `/api/voice/speak` | Render text in user's voice + target accent (+ emotion). |
+| `POST` | `/api/accent-clone` | Audio → ASR → same synthesis path. |
 
-See [API.md](API.md) for request fields and response details.
+See [API.md](API.md) for request fields, response details, and the `X-Word-Timings` header.
 
-## Model Overview
+### `/api/score` response shape (top-level fields)
 
-The core scoring path is implemented in `backend/app/api/score.py`.
+```jsonc
+{
+  "phonemes":  [ { "phoneme": "sh", "expected": "sh", "gop": -0.12, "correct": true, "start_ms": 80, "end_ms": 200, ... }, ... ],
+  "scores":    { "phoneme_accuracy": 91.8, "intonation": 99.5, "stress_rhythm": 100.0, "vowel_quality": 70.0 },
+  "overall":   92.4,
+  "feedback":  [ { "text": "Focus on /r/; your closest detected sound was /l/.", "timestamp_ms": 320 } ],
+  "transcript": { "text": "She sells seashells by the seashore.", "language_probability": 0.99 },
+  "wer": 0.0,
+  "phrase_match_status": "ok",                // ← new: "ok" | "partial" | "weak" | "mismatch" | null
+  "pitch_contour": { "user": [...], "native": [...], "duration_ms": 2270 },
+  "debug": {
+    "elapsed_ms": 1483,
+    "stage_ms": { "phoneme": 307, "native_f0": 942, "prosody": 4, "whisper": 230 },
+    "weights": { "phoneme_accuracy": 0.55, "intonation": 0.20, "stress_rhythm": 0.15, "vowel_quality": 0.10, "learned_overall_blend": 0.35 },
+    "raw_overall": 92.4,
+    "raw_phoneme_accuracy": 91.8,
+    "score_gates": [],
+    "phrase_match": { "wer": 0.0, "phrase_match": 100.0, ... },
+    "speech_rate_sps": 4.85
+  }
+}
+```
 
-- Audio is decoded, quality-checked, resampled to 16 kHz mono, trimmed, and peak-normalized.
-- `PhonemeEngine` converts reference text to ARPAbet phoneme IDs and aligns wav2vec2 CTC outputs to the expected phoneme sequence.
-- GOP scores are mapped into phoneme accuracy, optionally through a learned calibration head.
-- `ProsodyEngine` extracts F0, compares intonation with a Kokoro native pitch reference, estimates rhythm with nPVI, and can extract vowel formants.
-- Optional faster-whisper transcript matching adds phrase-match and WER grounding gates.
-- Optional WavLM embeddings support accent distance and the learned multi-aspect scorer when checkpoints are available.
+---
 
-Checkpoint files under `backend/checkpoints/` are intentionally gitignored except `.gitkeep`. A clean checkout still runs with public model downloads and deterministic fallbacks, but learned heads and accent centroids require local checkpoint files.
+## Configuration
 
-## Training And Evaluation
+### Frontend env
 
-Implemented training utilities live under `backend/training/`:
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_API_URL` | Backend origin, e.g. `http://127.0.0.1:8000`. Empty → demo/mock mode. |
+| `NEXT_PUBLIC_USE_MOCK` | `1` forces mock mode even with an API URL set. |
 
-- `train_phoneme_scorer.py` trains a small GOP regression head on `jbpark0614/speechocean762`.
-- `train_multitask_assessment.py` trains a WavLM embedding plus acoustic-feature head for accuracy, fluency, prosody, completeness, and overall score.
-- `build_accent_centroids.py` builds WavLM accent centroids from VCTK when available.
+### Backend env
 
-Evaluation support lives under `backend/evaluation/`:
+| Variable | Default / Example | Purpose |
+| --- | --- | --- |
+| `DEVICE` | `mps`, `cuda`, `cpu` | Torch device for core models. |
+| `CORS_ORIGINS` | `http://localhost:3000` | Comma-separated browser origins allowed to call the API. |
+| `WAV2VEC2_MODEL` | `slplab/wav2vec2-large-robust-L2-english-phoneme-recognition` | Phoneme CTC backbone. |
+| `WHISPER_MODEL` / `WHISPER_FALLBACK_MODEL` | `large-v3-turbo` / `large-v3` | faster-whisper model + fallback. |
+| `LOAD_WHISPER` | `1` locally, `0` in Docker default | Enables transcript / phrase-match grounding. |
+| `LOAD_VOICE_CLONE` | `1` locally, `0` in Docker default | Enables CosyVoice 3 (requires `mlx-audio-plus`). |
+| `SCORE_ASR_MODE` | `off`, `fast`, `words` | Transcript path: `off` = no ASR; `fast` = greedy text; `words` = full beam + per-word timestamps. |
+| `SCORE_INCLUDE_FORMANTS` | `0`, `1` | Enable formant extraction (slower; lights up vowel-quality scoring). |
+| `SCORE_WAVLM_MODE` | `auto`, `off` | WavLM embedding pass for assessment head + accent distance. |
+| `ASSESSMENT_SCORER_CHECKPOINT` | `checkpoints/assessment_head_best.pt` | Optional multi-aspect WavLM head. |
+| `ACCENT_CENTROIDS_PATH` | `checkpoints/accent_centroids.pt` | Optional WavLM accent centroids. |
+| `ENROLLMENT_DIR` | `data/enrollments` | Filesystem voice-store root. |
+| `NATIVE_F0_CACHE_DIR` | `cache/native_f0` | Disk cache for native pitch references. |
+| `VOICE_SYNTH_CACHE_DIR` | `cache/voice_synth` | Disk cache for `/voice/speak` outputs. |
+| `VOICE_SYNTH_CACHE_MAX_AGE_HOURS` | `24` | TTL for voice-synth cache entries. |
+
+---
+
+## Build, test, deploy
+
+```bash
+# Backend tests (34 tests)
+cd backend && source .venv/bin/activate
+python -m pytest tests/ -q
+
+# Frontend type-check + build
+cd frontend
+npx tsc --noEmit
+npm run build
+
+# Docker rebuild
+docker compose build --no-cache && docker compose up
+```
+
+The evaluation harness lives in `backend/evaluation/`:
 
 ```bash
 cd backend
 python -m evaluation.evaluate_score_api --manifest evaluation/score_manifest.jsonl
 ```
 
-The evaluator is manifest-based and tracks latency, WER, phrase match, gates, and expected score bounds.
+It tracks latency, WER, phrase match, score gates, and expected-score bounds against a manifest of recorded fixtures.
 
-## Build, Test, Rebuild
+---
 
-Frontend:
+## Repository layout
 
-```bash
-cd frontend
-npm run lint
-npm run build
+```
+PronounceAI/
+├── README.md  API.md  docker-compose.yml  LICENSE
+├── docs/
+│   ├── DEPLOYMENT.md
+│   ├── REDESIGN_PLAN.md
+│   └── samples/                      ← audio + JSON the README links to
+├── backend/
+│   ├── Dockerfile  setup.sh
+│   ├── requirements.txt  requirements.prod.txt
+│   ├── app/
+│   │   ├── main.py                   FastAPI lifespan + CORS
+│   │   ├── api/                      thin routers (score, tts, voice_enroll, accent_clone)
+│   │   ├── scoring/                  async scoring pipeline + fusion + feedback
+│   │   ├── services/                 voice_synth (shared by /voice/speak + /accent-clone)
+│   │   ├── models/                   model wrappers (phoneme, prosody, whisper, voice_clone, ...)
+│   │   ├── cache/                    shared LRU + atomic disk cache
+│   │   └── utils/                    audio, kokoro_speaker, voice_store, native_pitch
+│   ├── training/                     speechocean762 + WavLM training utilities
+│   ├── evaluation/                   manifest-driven score-API evaluator
+│   ├── scripts/                      sample generators
+│   └── tests/                        unit tests (pytest, no network)
+└── frontend/
+    ├── Dockerfile  package.json  next.config.ts
+    └── src/{app,components,lib}      App Router pages + practice/voice UI + API client
 ```
 
-Backend:
+---
 
-```bash
-cd backend
-source .venv/bin/activate
-PYTHONPATH=. python -m unittest discover -s tests
-```
+## Performance notes
 
-Docker rebuild:
+- All engines loaded once in FastAPI `lifespan` and reused via `app.state`.
+- `/api/score` fans out phoneme, native-F0, Whisper, and WavLM work concurrently with `asyncio.to_thread`.
+- `/api/voice/speak` and `/api/accent-clone` run CosyVoice + STT inside `asyncio.to_thread` so concurrent score requests stay responsive.
+- Disk + memory caches share one set of primitives (`app/cache/`); atomic writes prevent half-written WAVs.
+- Frontend cancels stale playback / scoring with `AbortSignal`.
 
-```bash
-docker compose build --no-cache
-docker compose up
-```
-
-## Performance Notes
-
-The codebase uses several practical latency controls:
-
-- Backend model instances are loaded once in FastAPI lifespan and reused through `app.state`.
-- `/api/score` runs independent phoneme, native-F0, Whisper, and WavLM work concurrently with `asyncio.to_thread`.
-- Response, transcript, embedding, phrase-token, TTS, and native-F0 caches reduce repeated work.
-- Frontend API helpers use small LRU caches and `AbortSignal` support to cancel stale playback/scoring work.
-- Docker defaults disable the heaviest optional paths for reliable CPU demos.
-
-Formal benchmark numbers are not committed. Use the evaluation manifest workflow for repeatable local measurement.
+---
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| Frontend says demo scorer | `NEXT_PUBLIC_API_URL` is empty or mock mode is forced | Set `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` and restart the frontend. |
-| Browser CORS error | Backend `CORS_ORIGINS` does not include the frontend origin | Set `CORS_ORIGINS=http://localhost:3000`. |
-| First backend request is slow | Model download or first model warmup | Let the request finish once; caches make later runs faster. |
-| Audio decode fails | Missing FFmpeg or unsupported browser encoding | Install FFmpeg locally or use Docker. |
-| Voice cloning unavailable | `LOAD_VOICE_CLONE=0` or CosyVoice dependencies unavailable | Use the Kokoro fallback path or enable voice clone in a compatible local environment. |
-| No transcript/WER | Whisper disabled or `SCORE_ASR_MODE=off` | Set `LOAD_WHISPER=1` and `SCORE_ASR_MODE=fast`. |
+| Frontend says "demo scorer" | `NEXT_PUBLIC_API_URL` empty or mock mode forced | Set `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000` and restart. |
+| Browser CORS error | `CORS_ORIGINS` doesn't include the frontend origin | Set `CORS_ORIGINS=http://localhost:3000`. |
+| First backend request is slow | Public model download + warmup | Let the first request finish; caches kick in after. |
+| Audio decode fails | Missing FFmpeg | Install FFmpeg locally (`brew install ffmpeg`) or use Docker. |
+| Voice cloning unavailable | `LOAD_VOICE_CLONE=0` or `mlx-audio-plus` missing | Install `mlx-audio-plus` on Apple Silicon, or accept the Kokoro fallback path. |
+| `phrase_match_status` is `null` | Whisper disabled | Set `LOAD_WHISPER=1` and `SCORE_ASR_MODE=fast`. |
 
-## Current Boundaries
+---
 
-- No server-side accounts or authentication.
-- No relational database or remote object storage.
-- Frontend target-accent controls currently expose GA and RP.
-- Voice enrollment audio is stored on the backend filesystem by opaque browser-generated user ID.
-- Production deployment details are intentionally omitted because that infrastructure is still evolving.
-- Some model paths are optional and degrade gracefully when checkpoints are absent.
+## Boundaries
 
-## Future Improvements
+- No server-side accounts or auth; voice enrollments are keyed by an opaque browser-generated user ID.
+- No relational database; progress lives in `localStorage` and voice store on the filesystem.
+- Target accents currently exposed in the frontend: General American (GA), Received Pronunciation (RP).
+- Voice cloning requires `mlx-audio-plus` (Apple Silicon). Other platforms fall back to Kokoro TTS in the requested accent.
 
-- Add authenticated multi-device user profiles.
-- Move enrollment audio and session history to durable storage.
-- Add formal CI for backend tests, frontend lint/build, and Docker smoke checks.
-- Expand target accent support beyond GA/RP in the frontend.
-- Add reproducible benchmark manifests with recorded fixtures.
-- Improve learned assessment calibration with larger held-out evaluation sets.
-- Package optional heavy voice-clone dependencies behind a separate container profile.
+---
+
+## Roadmap
+
+- Multi-device profiles backed by a durable store.
+- Expand accent coverage beyond GA/RP in the frontend (AuE, Irish, Scottish, IndianE already supported by TTS).
+- Reproducible benchmark manifests with recorded human fixtures.
+- Larger held-out evaluation set for the WavLM multi-aspect head.
+- CI for backend pytest, frontend lint/build, and a Docker smoke test.
+
+---
 
 ## License
 

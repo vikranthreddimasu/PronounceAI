@@ -2,18 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Accent } from "@/lib/types";
-import { convertAccent } from "@/lib/api";
 import { cloneAccent, speakInVoice, type VoiceProfile } from "@/lib/voiceProfile";
 import { isAbortError } from "@/lib/abortError";
-
-type Mode = "native" | "personal";
 
 type Props = {
   userAudio: Blob | null;
   accent: Accent;
   /** Profile loaded from /api/voice/<id>. Null when no enrollment. */
   voiceProfile: VoiceProfile | null;
-  /** Known target phrase; lets personal mode skip ASR and hit speculative voice cache. */
+  /** Known target phrase; lets us skip ASR and hit the speculative voice cache. */
   overrideText?: string;
   /** Triggered when the user wants to (re-)enroll. */
   onOpenEnrollment: () => void;
@@ -24,17 +21,6 @@ const ACCENT_NAME: Record<Accent, string> = {
   RP: "British RP",
 };
 
-const MODE_DESC: Record<Mode, { title: string; sub: string }> = {
-  native: {
-    title: "Native speaker",
-    sub: "Words rendered in a native speaker's voice. Fast.",
-  },
-  personal: {
-    title: "Your voice",
-    sub: "Your timbre with the target accent locked in.",
-  },
-};
-
 export default function AccentConvertCard({
   userAudio,
   accent,
@@ -42,7 +28,6 @@ export default function AccentConvertCard({
   overrideText,
   onOpenEnrollment,
 }: Props) {
-  const [mode, setMode] = useState<Mode>(voiceProfile ? "personal" : "native");
   const [state, setState] = useState<"idle" | "converting" | "ready" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [convertedUrl, setConvertedUrl] = useState<string | null>(null);
@@ -75,19 +60,18 @@ export default function AccentConvertCard({
     }
     setIsPlaying(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userAudio, accent, mode]);
+  }, [userAudio, accent, voiceProfile?.user_id]);
 
   useEffect(() => {
     convertedUrlRef.current = convertedUrl;
   }, [convertedUrl]);
 
-  // If profile appears/disappears, sync mode reasonably.
-  useEffect(() => {
-    if (!voiceProfile && mode === "personal") setMode("native");
-  }, [voiceProfile, mode]);
-
   const handleConvert = useCallback(async () => {
     if (!userAudio || state === "converting") return;
+    if (!voiceProfile) {
+      onOpenEnrollment();
+      return;
+    }
     convertAbortRef.current?.abort();
     const ac = new AbortController();
     convertAbortRef.current = ac;
@@ -95,24 +79,19 @@ export default function AccentConvertCard({
     setErrorMsg(null);
     try {
       let blob: Blob;
-      if (mode === "personal") {
-        if (!voiceProfile) throw new Error("Set up your voice first.");
-        if (overrideText?.trim()) {
-          blob = (
-            await speakInVoice(
-              voiceProfile.user_id,
-              overrideText,
-              accent,
-              voiceProfile.revision,
-              "target_accent",
-              ac.signal
-            )
-          ).audio;
-        } else {
-          blob = await cloneAccent(userAudio, accent, voiceProfile.user_id, { signal: ac.signal });
-        }
+      if (overrideText?.trim()) {
+        blob = (
+          await speakInVoice(
+            voiceProfile.user_id,
+            overrideText,
+            accent,
+            voiceProfile.revision,
+            "target_accent",
+            ac.signal
+          )
+        ).audio;
       } else {
-        blob = await convertAccent(userAudio, accent, { signal: ac.signal });
+        blob = await cloneAccent(userAudio, accent, voiceProfile.user_id, { signal: ac.signal });
       }
       if (!mountedRef.current || ac.signal.aborted) return;
       const url = URL.createObjectURL(blob);
@@ -138,7 +117,7 @@ export default function AccentConvertCard({
     } finally {
       if (convertAbortRef.current === ac) convertAbortRef.current = null;
     }
-  }, [userAudio, accent, mode, voiceProfile, overrideText, state]);
+  }, [userAudio, accent, voiceProfile, overrideText, state, onOpenEnrollment]);
 
   const handleReplay = useCallback(() => {
     if (!convertedUrl) return;
@@ -155,7 +134,9 @@ export default function AccentConvertCard({
 
   const isConverting = state === "converting";
   const isReady = state === "ready";
-  const desc = MODE_DESC[mode];
+  const subTitle = voiceProfile
+    ? "Your timbre with the target accent locked in."
+    : "Set up your voice to hear this phrase in your own timbre.";
 
   return (
     <div
@@ -186,7 +167,7 @@ export default function AccentConvertCard({
             Accent conversion · {ACCENT_NAME[accent]}
           </div>
           <div className="text-sm font-semibold" style={{ color: "var(--ink)", marginTop: 2 }}>
-            {desc.title}
+            {voiceProfile ? "Your voice" : "Set up your voice"}
           </div>
         </div>
 
@@ -234,7 +215,7 @@ export default function AccentConvertCard({
               alignItems: "center",
               gap: 6,
             }}
-            disabled={isConverting || (mode === "personal" && !voiceProfile)}
+            disabled={isConverting}
             onClick={handleConvert}
           >
             {isConverting && (
@@ -251,7 +232,7 @@ export default function AccentConvertCard({
                 }}
               />
             )}
-            {isConverting ? "Converting" : "Convert"}
+            {isConverting ? "Converting" : voiceProfile ? "Convert" : "Set up voice"}
           </button>
         )}
       </div>
@@ -263,35 +244,12 @@ export default function AccentConvertCard({
         {state === "error"
           ? errorMsg
           : isConverting
-          ? mode === "personal"
-            ? "Locking the target accent to your voice..."
-            : "Mapping your speech into the target accent..."
+          ? "Locking the target accent to your voice..."
           : isReady
           ? "Compare it with your original above."
-          : desc.sub}
+          : subTitle}
       </p>
 
-      {/* Mode switcher */}
-      <div
-        className="flex items-center gap-0.5 rounded-lg"
-        style={{ background: "var(--bg-2)", padding: 3, marginTop: 12, border: "1px solid var(--line)" }}
-      >
-        <ModeBtn
-          label="Native speaker"
-          active={mode === "native"}
-          onClick={() => setMode("native")}
-        />
-        <ModeBtn
-          label={voiceProfile ? "Your voice" : "Set up voice"}
-          active={mode === "personal"}
-          onClick={() => {
-            if (voiceProfile) setMode("personal");
-            else onOpenEnrollment();
-          }}
-        />
-      </div>
-
-      {/* Enrollment CTA when not yet enrolled */}
       {!voiceProfile && (
         <button
           className="press hover-accent"
@@ -309,37 +267,9 @@ export default function AccentConvertCard({
             transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out)",
           }}
         >
-          Set up your voice to hear this accent in your own timbre
+          Record a short voice sample to enable accent conversion
         </button>
       )}
     </div>
-  );
-}
-
-function ModeBtn({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className="press text-xs font-semibold"
-      onClick={onClick}
-      style={{
-        flex: 1,
-        padding: "7px 0",
-        borderRadius: 8,
-        background: active ? "var(--surface-2)" : "transparent",
-        color: active ? "var(--ink)" : "var(--ink-4)",
-        border: active ? "1px solid var(--line)" : "1px solid transparent",
-        transition: "background-color 180ms var(--ease-out), color 180ms var(--ease-out), border-color 180ms var(--ease-out)",
-      }}
-    >
-      {label}
-    </button>
   );
 }

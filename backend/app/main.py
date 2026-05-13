@@ -141,20 +141,6 @@ async def lifespan(app: FastAPI):
         app.state.whisper = None
         logger.info("Skipping Whisper engine — LOAD_WHISPER=0")
 
-    app.state.accent_converter = None
-    app.state.accent_converter_lock = asyncio.Lock()
-    if os.getenv("PRELOAD_ACCENT_CONVERTER", "0") == "1":
-        try:
-            from app.models.accent_converter import AccentConverter
-            # knn-vc bundled WavLM is incompatible with MPS (float64 ops). Force CPU.
-            app.state.accent_converter = AccentConverter(device="cpu")
-            logger.info("Accent converter ready")
-        except Exception as e:
-            logger.warning(f"Accent converter unavailable: {e}")
-            app.state.accent_converter = None
-    else:
-        logger.info("Accent converter will lazy-load on first use")
-
     if LOAD_VOICE_CLONE:
         try:
             from app.models.voice_clone import VoiceClone
@@ -206,12 +192,10 @@ app.add_middleware(
 
 from app.api.score import router as score_router
 from app.api.tts import router as tts_router
-from app.api.accent_convert import router as accent_convert_router
 from app.api.voice_enroll import router as voice_enroll_router
 from app.api.accent_clone import router as accent_clone_router
 app.include_router(score_router, prefix="/api")
 app.include_router(tts_router, prefix="/api")
-app.include_router(accent_convert_router, prefix="/api")
 app.include_router(voice_enroll_router, prefix="/api")
 app.include_router(accent_clone_router, prefix="/api")
 

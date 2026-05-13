@@ -5,6 +5,12 @@ backend/checkpoints/*
 !backend/checkpoints/.gitkeep
 backend/cache/
 
+# Stray pip stdout captured to a file (e.g. `pip install kokoro>=0.9.4`)
+=*
+# macOS Finder duplicates (e.g. "foo 2.py", "Dockerfile 2")
+* 2.*
+* 2
+
 # Audio artifacts (recorded clips, synth outputs, model weights)
 *.wav
 *.flac
@@ -12,6 +18,10 @@ backend/cache/
 *.pt
 *.ckpt
 *.safetensors
+
+# Committed audio + JSON showcase samples
+!docs/samples/
+!docs/samples/**
 
 # zip files
 *.zip

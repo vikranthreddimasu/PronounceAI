@@ -3,31 +3,51 @@ POST /api/accent-clone
 
 Personal accent conversion that preserves the user's voice timbre.
 
-Pipeline:
-  1. The user's submitted recording is transcribed with Whisper to get the
-     target text we should render.
-  2. Their enrollment clip (recorded once via /api/voice/enroll) provides
-     target speaker timbre.
-  3. The requested accent is rendered first, then voice-converted into the
-     enrolled speaker for more reliable accent consistency.
+Two input modes:
+  * Caller provides ``override_text`` — render that text in the user's voice.
+  * Caller uploads ``audio`` — Whisper ASR derives the text, then we synth.
 
-Returns: audio/wav at the CosyVoice native sample rate.
+Both modes converge on ``services.voice_synth.synthesize_user_voice`` so the
+caching / fallback / emotion-routing logic is shared with ``/api/voice/speak``.
 """
+from __future__ import annotations
+
 import logging
-import time
 
 import numpy as np
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 
-from app.api.voice_enroll import _estimate_word_timings, _voice_headers
+from app.services import voice_synth
+from app.services.voice_synth import (
+    VoiceSynthError,
+    MAX_TEXT_CHARS,
+    response_headers as _voice_headers,
+)
 from app.utils.audio import AudioError, preprocess
-from app.utils.voice_store import VoiceStoreError, get_enrollment
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_MAX_TEXT_CHARS = 400
+
+def _transcribe_audio(request: Request, audio_bytes: bytes) -> str:
+    whisper = getattr(request.app.state, "whisper", None)
+    if whisper is None:
+        raise HTTPException(status_code=503, detail="Transcription engine not loaded.")
+    try:
+        wav, _ = preprocess(audio_bytes)
+    except AudioError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error(f"Audio decode failed: {e}")
+        raise HTTPException(status_code=400, detail="Could not read audio file.")
+    wav_np = wav.squeeze(0).numpy().astype(np.float32)
+    try:
+        asr = whisper.transcribe(wav_np)
+        return asr["text"].strip()
+    except Exception as e:
+        logger.warning(f"Whisper failed during accent-clone: {e}")
+        raise HTTPException(status_code=500, detail="Could not transcribe your recording.")
 
 
 @router.post("/accent-clone")
@@ -39,141 +59,37 @@ async def accent_clone(
     override_text: str = Form(""),
     emotion: str = Form("neutral"),
 ):
-    accent = accent.upper()
-
-    voice_clone = getattr(request.app.state, "voice_clone", None)
-    whisper = getattr(request.app.state, "whisper", None)
-
-    if voice_clone is not None and accent not in voice_clone.supported_accents():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Accent '{accent}' not supported. Choose: {voice_clone.supported_accents()}",
-        )
-    emotion_input = (emotion or "neutral").lower()
-    if voice_clone is not None and emotion_input != "auto" and emotion_input not in voice_clone.supported_emotions():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Emotion '{emotion}' not supported. Choose: {voice_clone.supported_emotions()} or 'auto'",
-        )
-
-    try:
-        info = get_enrollment(user_id)
-    except VoiceStoreError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    if info is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No voice enrollment found for this user. Record an enrollment first.",
-        )
-
-    # Decide target text. If the caller already knows the target text
-    # (e.g. the phrase they were asked to read) we skip ASR — faster + no
-    # risk of transcription errors. Otherwise Whisper handles it.
     target_text = override_text.strip()
     if not target_text:
-        if whisper is None:
-            raise HTTPException(status_code=503, detail="Transcription engine not loaded.")
-        try:
-            raw = await audio.read()
-            wav, _ = preprocess(raw)
-        except AudioError as e:
-            raise HTTPException(status_code=422, detail=str(e))
-        except Exception as e:
-            logger.error(f"Audio decode failed: {e}")
-            raise HTTPException(status_code=400, detail="Could not read audio file.")
-        wav_np = wav.squeeze(0).numpy().astype(np.float32)
-        try:
-            asr = whisper.transcribe(wav_np)
-            target_text = asr["text"].strip()
-        except Exception as e:
-            logger.warning(f"Whisper failed during accent-clone: {e}")
-            raise HTTPException(status_code=500, detail="Could not transcribe your recording.")
+        audio_bytes = await audio.read()
+        target_text = _transcribe_audio(request, audio_bytes)
     if not target_text:
         raise HTTPException(
             status_code=422,
             detail="Could not detect any words in the recording.",
         )
-    if len(target_text) > _MAX_TEXT_CHARS:
-        target_text = target_text[:_MAX_TEXT_CHARS]
-
-    resolved_emotion = emotion_input
-    detected_label = ""
-    detected_score = 0.0
-    if emotion_input == "auto":
-        detector = getattr(request.app.state, "emotion_detector", None)
-        if detector is None:
-            resolved_emotion = "neutral"
-        else:
-            resolved_emotion, detected_score, detected_label = detector.detect(target_text)
-            logger.info(
-                f"accent-clone auto-emotion: raw={detected_label} "
-                f"score={detected_score:.2f} → {resolved_emotion}"
-            )
-
-    t0 = time.perf_counter()
-    if voice_clone is None:
-        try:
-            from app.api.tts import VOICE_MAP, _synthesize
-
-            if accent not in VOICE_MAP:
-                accent = "GA"
-            lang_code, voice = VOICE_MAP[accent]
-            wav_bytes = _synthesize(target_text, lang_code, voice, 0.9)
-        except Exception as e:
-            logger.exception(f"Kokoro accent fallback failed: {e}")
-            raise HTTPException(status_code=500, detail="Accent clone failed.")
-        elapsed = round((time.perf_counter() - t0) * 1000)
-        words = _estimate_word_timings(target_text, max(500, len(target_text.split()) * 380))
-        logger.info(
-            f"Accent clone {user_id[:6]}… → {accent} (kokoro_fallback) "
-            f"| '{target_text[:40]}…' | {elapsed}ms"
-        )
-        return Response(
-            content=wav_bytes,
-            media_type="audio/wav",
-            headers=_voice_headers(
-                text=target_text,
-                accent=accent,
-                strategy="target_accent",
-                mode="kokoro_fallback",
-                emotion=resolved_emotion,
-                words=words,
-                emotion_source="auto" if emotion_input == "auto" else "manual",
-                detected_label=detected_label,
-                detected_score=detected_score,
-            ),
-        )
+    if len(target_text) > MAX_TEXT_CHARS:
+        target_text = target_text[:MAX_TEXT_CHARS]
 
     try:
-        result = voice_clone.speak(
+        result = await voice_synth.synthesize_user_voice(
+            request.app,
+            user_id=user_id,
             text=target_text,
-            ref_audio_path=info["ref_path"],
             accent=accent,
-            ref_text=info.get("ref_text", ""),
             strategy="target_accent",
-            emotion=resolved_emotion,
+            emotion=emotion,
         )
-    except Exception as e:
-        logger.exception(f"CosyVoice synthesis failed: {e}")
-        raise HTTPException(status_code=500, detail="Accent clone failed.")
-    elapsed = round((time.perf_counter() - t0) * 1000)
-    logger.info(
-        f"Accent clone {user_id[:6]}… → {accent} ({result.strategy}/{result.mode}) "
-        f"| '{target_text[:40]}…' | {elapsed}ms | {len(result.words)} words"
-    )
+    except VoiceSynthError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
 
-    return FileResponse(
-        path=str(result.path),
+    logger.info(
+        f"accent-clone {user_id[:6]}… → {result.accent} "
+        f"({result.strategy}/{result.mode}) | '{result.text[:40]}…' "
+        f"| {result.elapsed_ms}ms | {len(result.words)} words"
+    )
+    return Response(
+        content=result.wav_bytes,
         media_type="audio/wav",
-        headers=_voice_headers(
-            text=target_text,
-            accent=accent,
-            strategy=result.strategy,
-            mode=result.mode,
-            emotion=resolved_emotion,
-            words=result.words,
-            emotion_source="auto" if emotion_input == "auto" else "manual",
-            detected_label=detected_label,
-            detected_score=detected_score,
-        ),
+        headers=_voice_headers(result),
     )

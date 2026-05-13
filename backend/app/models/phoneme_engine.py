@@ -7,21 +7,24 @@ Pipeline:
   3. Parse non-blank runs → start_ms / end_ms per phoneme
   4. GOP score = mean log P(expected_ph | frames in segment)
   5. Substitution detection = argmax over segment vs expected token
-  6. MLP regression head (optional) → calibrated 0-100 score from raw GOP
 
 Note: forced_align is a CPU-only operation; log_probs are computed on MPS then
 moved to CPU before alignment.
+
+The legacy per-phone calibration head was removed: the underlying speechocean762
+dataset on HF only exposes utterance-level scores, so the same calibrated value
+was being attached to every phone in a clip, implying granularity that did not
+exist. The WavLM multi-aspect AssessmentScorer covers utterance-level
+calibration; raw GOP is the authentic per-phone signal.
 """
 import logging
 import os
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torchaudio
 from transformers import AutoProcessor, AutoModelForCTC
 
@@ -47,28 +50,6 @@ class PhonemeResult:
     substitution: str | None
     start_ms: int
     end_ms: int
-    calibrated_score: float | None
-
-
-class MLPHead(nn.Module):
-    def __init__(self, input_dim: int):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.BatchNorm1d(input_dim),
-            nn.Linear(input_dim, 256),
-            nn.GELU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 128),
-            nn.GELU(),
-            nn.Dropout(0.15),
-            nn.Linear(128, 64),
-            nn.GELU(),
-            nn.Linear(64, 1),
-            nn.Sigmoid(),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x).squeeze(-1) * 100  # → [B] in [0, 100]
 
 
 class PhonemeEngine:
@@ -88,20 +69,10 @@ class PhonemeEngine:
         self.blank_id = vocab.get("<pad>", 0)
         logger.info(f"Vocab size: {len(vocab)}, blank_id: {self.blank_id}")
 
-        # Optional regression head
-        self.head: MLPHead | None = None
-        self.head_input_dim: int | None = None
-        if checkpoint_path and Path(checkpoint_path).exists():
-            state = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
-            dim = state.get("input_dim", len(vocab))
-            head = MLPHead(input_dim=dim)
-            head.load_state_dict(state["model_state_dict"])
-            head.to(self.device).eval()
-            self.head = head
-            self.head_input_dim = dim
-            logger.info(f"Regression head loaded (dim={dim}, val_loss={state.get('val_loss', '?'):.4f})")
-        else:
-            logger.info("No regression head — raw GOP scores used")
+        # The ``checkpoint_path`` argument is retained for backwards-compatible
+        # signatures with app.main but is unused — see module docstring.
+        if checkpoint_path:
+            logger.info("Phoneme engine: legacy regression head ignored (using raw GOP).")
 
     @torch.inference_mode()
     def score(
@@ -188,13 +159,6 @@ class PhonemeEngine:
         if pred_str != expected_str and not correct:
             substitution = f"{pred_str}→{expected_str}"
 
-        # Calibrated score from regression head
-        calibrated: float | None = None
-        if self.head is not None and self.head_input_dim is not None:
-            # Use mean log-prob vector (same feature as training)
-            feat = log_probs.mean(dim=0).unsqueeze(0).to(self.device)  # [1, vocab]
-            calibrated = float(self.head(feat).item())
-
         return PhonemeResult(
             phoneme=pred_str if not correct else expected_str,
             expected=expected_str,
@@ -203,7 +167,6 @@ class PhonemeEngine:
             substitution=substitution,
             start_ms=start_f * FRAME_DURATION_MS,
             end_ms=end_f * FRAME_DURATION_MS,
-            calibrated_score=round(calibrated, 1) if calibrated is not None else None,
         )
 
     def _parse_segments(
@@ -367,14 +330,15 @@ class PhonemeEngine:
         return [self.id_to_token.get(i, "?") for i in ids]
 
     def accuracy_score(self, results: list[PhonemeResult]) -> float:
-        """0-100 phoneme accuracy. Uses calibrated scores when available."""
+        """0-100 phoneme accuracy from raw GOP.
+
+        Monotone map: GOP=0 → 100, GOP=-3 → 0, with mild compression so the
+        head-room around perfect phonation does not produce 100 for everyone.
+        """
         if not results:
             return 0.0
-        scores = []
+        scores: list[float] = []
         for r in results:
-            if r.calibrated_score is not None:
-                scores.append(r.calibrated_score)
-            else:
-                # Map raw GOP to 0-100: GOP=0 → 100, GOP=-3 → 0
-                scores.append(max(0.0, min(100.0, (r.gop + 3.0) / 3.0 * 100.0)))
+            gop = float(r.gop)
+            scores.append(max(0.0, min(100.0, (gop + 3.0) / 3.0 * 100.0)))
         return round(sum(scores) / len(scores), 1)
