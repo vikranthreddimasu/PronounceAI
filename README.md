@@ -10,6 +10,8 @@
 
 **Listen to every sample inline →** <https://vikranthreddimasu.github.io/PronounceAI/>
 
+![Voice Lab — render any English text in your own voice, in the accent you choose](docs/screenshots/voice-lab.png)
+
 ---
 
 ## Hear it before you read about it
@@ -99,8 +101,6 @@ Three score JSON fixtures are committed so the response shape is inspectable wit
 Each fixture carries per-phoneme GOP with timestamps, the four scoring dimensions, the discrete `phrase_match_status`, the pitch overlay, and a `debug` block exposing weights and raw scores. The native-accent references that drive the pitch overlay are in the [gallery](https://vikranthreddimasu.github.io/PronounceAI/#tts-ship) too.
 
 ### 3 · The product UI
-
-![Voice Lab — render any English text in your own voice, in the accent you choose](docs/screenshots/voice-lab.png)
 
 | Route | What it does |
 | --- | --- |
